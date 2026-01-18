@@ -24,3 +24,9 @@ Must use `-tags "fts5"` for SQLite FTS5 support. Already configured in Makefile.
 
 ## Data Location
 `~/.xhub/xhub.db` - SQLite database with FTS5 and vector storage
+
+## TUI Keybindings
+- `j/k` nav, `g/G` top/end, `/` search, `Esc` unfocus
+- `Enter` edit modal (Tab to switch fields, Enter save, Esc cancel)
+- `d` delete (y confirm, n cancel)
+- `o` open in browser, `1-4` toggle source filters
