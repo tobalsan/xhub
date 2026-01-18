@@ -21,12 +21,12 @@ type model struct {
 	store       *db.Store
 	searchInput textinput.Model
 	list        list.Model
-	bookmarks   []db.Bookmark
-	sources     map[string]bool // Source filter toggles
-	width       int
-	height      int
-	searching   bool
-	err         error
+	allBookmarks []db.Bookmark   // Unfiltered search results
+	sources      map[string]bool // Source filter toggles
+	width        int
+	height       int
+	searching    bool
+	err          error
 }
 
 type bookmarkItem struct {
@@ -246,7 +246,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.store = msg.store
-		m.bookmarks = msg.bookmarks
+		m.allBookmarks = msg.bookmarks
 		m.list.SetItems(m.bookmarksToItems(msg.bookmarks))
 
 	case searchMsg:
@@ -254,7 +254,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 			return m, nil
 		}
-		m.bookmarks = msg.bookmarks
+		m.allBookmarks = msg.bookmarks
 		m.list.SetItems(m.bookmarksToItems(msg.bookmarks))
 
 	case refreshMsg:
@@ -262,6 +262,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = msg.err
 		}
 		return m, m.doSearch(m.searchInput.Value())
+
+	case filterMsg:
+		// Re-filter from allBookmarks (non-destructive)
+		m.list.SetItems(m.bookmarksToItems(m.allBookmarks))
+		return m, nil
 	}
 
 	if m.searching {
@@ -282,14 +287,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+type filterMsg struct{}
+
 func (m model) filterResults() tea.Msg {
-	filtered := make([]db.Bookmark, 0)
-	for _, b := range m.bookmarks {
-		if m.sources[b.Source] {
-			filtered = append(filtered, b)
-		}
-	}
-	return searchMsg{bookmarks: filtered}
+	return filterMsg{}
 }
 
 func (m model) bookmarksToItems(bookmarks []db.Bookmark) []list.Item {
