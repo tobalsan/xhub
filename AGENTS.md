@@ -20,6 +20,7 @@ Must use `-tags "fts5"` for SQLite FTS5 support. Already configured in Makefile.
 - `bird` CLI for X/Twitter bookmarks (optional)
 - `OPENAI_API_KEY` for embeddings
 - `ANTHROPIC_API_KEY` for summarization
+- bird CLI requires X.com cookies in Safari/Chrome/Firefox (run `bird whoami` to verify auth)
 
 ## Data Location
 `~/.xhub/xhub.db` - SQLite database with FTS5 and vector storage

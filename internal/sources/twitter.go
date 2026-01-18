@@ -2,6 +2,7 @@ package sources
 
 import (
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"time"
 
@@ -23,42 +24,51 @@ func (t *TwitterSource) Available() bool {
 	return err == nil
 }
 
+// birdBookmark matches the JSON schema from bird CLI --json output
 type birdBookmark struct {
 	ID        string `json:"id"`
 	Text      string `json:"text"`
-	URL       string `json:"url"`
-	CreatedAt string `json:"created_at"`
+	CreatedAt string `json:"createdAt"`
 	Author    struct {
 		Username string `json:"username"`
+		Name     string `json:"name"`
 	} `json:"author"`
 }
 
+// birdResponse handles paginated response: { tweets: [...], nextCursor: "..." }
+type birdResponse struct {
+	Tweets     []birdBookmark `json:"tweets"`
+	NextCursor string         `json:"nextCursor"`
+}
+
 func (t *TwitterSource) Fetch() ([]db.Bookmark, error) {
-	// Use bird CLI to get bookmarks
-	// Command TBD based on bird CLI interface - trying common patterns
-	cmd := exec.Command("bird", "bookmarks", "--json")
+	// Use bird CLI to fetch all bookmarks with --all --json
+	// bird bookmarks --all --json returns { tweets: [...], nextCursor: "..." }
+	cmd := exec.Command("bird", "bookmarks", "--all", "--json")
 
 	output, err := cmd.Output()
 	if err != nil {
-		// Try alternative command
-		cmd = exec.Command("bird", "bookmarks", "list", "--json")
-		output, err = cmd.Output()
-		if err != nil {
-			return nil, err
+		return nil, fmt.Errorf("bird bookmarks failed: %w", err)
+	}
+
+	// Parse response - bird returns { tweets: [...], nextCursor: "..." } when using --all
+	var resp birdResponse
+	if err := json.Unmarshal(output, &resp); err != nil {
+		// Try parsing as direct array (fallback for older versions)
+		var tweets []birdBookmark
+		if arrErr := json.Unmarshal(output, &tweets); arrErr != nil {
+			return nil, fmt.Errorf("failed to parse bird output: %w", err)
 		}
+		resp.Tweets = tweets
 	}
 
-	var tweets []birdBookmark
-	if err := json.Unmarshal(output, &tweets); err != nil {
-		return nil, err
-	}
-
-	bookmarks := make([]db.Bookmark, 0, len(tweets))
-	for _, tweet := range tweets {
+	bookmarks := make([]db.Bookmark, 0, len(resp.Tweets))
+	for _, tweet := range resp.Tweets {
 		createdAt := time.Now()
 		if tweet.CreatedAt != "" {
-			if t, err := time.Parse(time.RFC3339, tweet.CreatedAt); err == nil {
-				createdAt = t
+			// bird uses ISO 8601 format
+			if parsed, err := time.Parse(time.RFC3339, tweet.CreatedAt); err == nil {
+				createdAt = parsed
 			}
 		}
 
@@ -67,9 +77,12 @@ func (t *TwitterSource) Fetch() ([]db.Bookmark, error) {
 			title = title[:100] + "..."
 		}
 
+		// Construct tweet URL from author username and tweet ID
+		url := fmt.Sprintf("https://x.com/%s/status/%s", tweet.Author.Username, tweet.ID)
+
 		bookmarks = append(bookmarks, db.Bookmark{
 			Source:       "x",
-			URL:          tweet.URL,
+			URL:          url,
 			Title:        title,
 			RawContent:   tweet.Text,
 			CreatedAt:    createdAt,
