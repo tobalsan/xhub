@@ -187,6 +187,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, m.doSearch(m.searchInput.Value())
 			}
 			// Open edit modal (placeholder)
+		case "j", "down":
+			if !m.searching {
+				m.list.CursorDown()
+				return m, nil
+			}
+		case "k", "up":
+			if !m.searching {
+				m.list.CursorUp()
+				return m, nil
+			}
+		case "g":
+			if !m.searching {
+				m.list.Select(0)
+				return m, nil
+			}
+		case "G":
+			if !m.searching {
+				items := m.list.Items()
+				if len(items) > 0 {
+					m.list.Select(len(items) - 1)
+				}
+				return m, nil
+			}
 		case "o":
 			if !m.searching {
 				if item, ok := m.list.SelectedItem().(bookmarkItem); ok {
@@ -330,7 +353,7 @@ func (m model) View() string {
 		Foreground(lipgloss.Color("240")).
 		MarginTop(1)
 
-	help := "[/]search [o]pen [Enter]edit [d]elete [1-4]toggle filters [q]uit"
+	help := "[j/k]nav [g/G]top/end [/]search [o]pen [Enter]edit [d]elete [1-4]filters [q]uit"
 	b.WriteString(helpStyle.Render(help))
 
 	return b.String()
