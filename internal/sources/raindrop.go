@@ -2,6 +2,7 @@ package sources
 
 import (
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"time"
 
@@ -34,28 +35,48 @@ type raindropItem struct {
 }
 
 func (r *RaindropSource) Fetch() ([]db.Bookmark, error) {
-	// Use raindrop CLI to list bookmarks
-	cmd := exec.Command("raindrop", "list", "--json")
+	var allItems []raindropItem
+	page := 0
+	limit := 50 // max per page
 
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, err
+	for {
+		cmd := exec.Command("raindrop", "list", "--json", "--limit", "50", "--page", itoa(page))
+		output, err := cmd.Output()
+		if err != nil {
+			if page == 0 {
+				return nil, err
+			}
+			break // stop on error after first page
+		}
+
+		var items []raindropItem
+		if err := json.Unmarshal(output, &items); err != nil {
+			var resp struct {
+				Items []raindropItem `json:"items"`
+			}
+			if err := json.Unmarshal(output, &resp); err != nil {
+				if page == 0 {
+					return nil, err
+				}
+				break
+			}
+			items = resp.Items
+		}
+
+		if len(items) == 0 {
+			break
+		}
+
+		allItems = append(allItems, items...)
+
+		if len(items) < limit {
+			break // last page
+		}
+		page++
 	}
 
-	var items []raindropItem
-	if err := json.Unmarshal(output, &items); err != nil {
-		// Try parsing as object with items array
-		var resp struct {
-			Items []raindropItem `json:"items"`
-		}
-		if err := json.Unmarshal(output, &resp); err != nil {
-			return nil, err
-		}
-		items = resp.Items
-	}
-
-	bookmarks := make([]db.Bookmark, 0, len(items))
-	for _, item := range items {
+	bookmarks := make([]db.Bookmark, 0, len(allItems))
+	for _, item := range allItems {
 		createdAt := time.Now()
 		if item.Created != "" {
 			if t, err := time.Parse(time.RFC3339, item.Created); err == nil {
@@ -84,4 +105,8 @@ func (r *RaindropSource) Fetch() ([]db.Bookmark, error) {
 	}
 
 	return bookmarks, nil
+}
+
+func itoa(i int) string {
+	return fmt.Sprintf("%d", i)
 }
