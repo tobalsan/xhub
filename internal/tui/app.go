@@ -81,7 +81,8 @@ func sourceIcon(source string) string {
 func initialModel(cfg *config.Config) model {
 	ti := textinput.New()
 	ti.Placeholder = "Search bookmarks..."
-	ti.Focus()
+	// Start with list focused, not search input
+	ti.Blur()
 	ti.CharLimit = 256
 	ti.Width = 50
 
@@ -102,7 +103,7 @@ func initialModel(cfg *config.Config) model {
 			"github":   true,
 			"manual":   true,
 		},
-		searching: true,
+		searching: false, // Start with list focused
 	}
 }
 
@@ -132,10 +133,7 @@ type deleteMsg struct {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(
-		textinput.Blink,
-		m.initStore,
-	)
+	return m.initStore
 }
 
 func (m model) initStore() tea.Msg {
