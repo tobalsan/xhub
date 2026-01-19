@@ -12,7 +12,7 @@ import (
 const lastRefreshKey = "last_refresh_at"
 
 // Fetch fetches and indexes bookmarks from all enabled sources
-func Fetch(cfg *config.Config, force bool) error {
+func Fetch(cfg *config.Config, force bool, verbose bool) error {
 	store, err := db.NewStore(cfg.DataDir)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
@@ -113,31 +113,57 @@ func Fetch(cfg *config.Config, force bool) error {
 
 			// Scrape content
 			if b.RawContent == "" {
+				if verbose {
+					fmt.Printf("\n  Scraping: %s\n", b.URL)
+				}
 				content, err := scraper.Scrape(b.URL)
 				if err != nil {
+					if verbose {
+						fmt.Printf("  Scraping failed: %v\n", err)
+					}
 					b.ScrapeStatus = "failed"
 					store.Update(&b)
 					continue
 				}
 				b.RawContent = content
+				if verbose {
+					fmt.Printf("  Scraped %d characters\n", len(content))
+				}
 			}
 
 			// Summarize
 			if b.Summary == "" && summarizer != nil {
+				if verbose {
+					fmt.Printf("  Summarizing...\n")
+				}
 				result, err := summarizer.Summarize(b.RawContent)
-				if err == nil && result != nil {
+				if err != nil {
+					fmt.Printf("Warning: summarization failed for %s: %v\n", b.URL, err)
+				} else if result != nil {
 					b.Summary = result.Summary
 					if b.Keywords == "" {
 						b.Keywords = result.Keywords
+					}
+					if verbose {
+						fmt.Printf("  Summary: %s\n", result.Summary)
+						fmt.Printf("  Keywords: %s\n", result.Keywords)
 					}
 				}
 			}
 
 			// Generate embedding
 			if embedder != nil {
+				if verbose {
+					fmt.Printf("  Generating embedding...\n")
+				}
 				textToEmbed := b.Title + " " + b.Summary + " " + b.Keywords
-				if embedding, err := embedder.Embed(textToEmbed); err == nil {
+				if embedding, err := embedder.Embed(textToEmbed); err != nil {
+					fmt.Printf("Warning: embedding failed for %s: %v\n", b.URL, err)
+				} else {
 					store.UpdateEmbedding(b.ID, embedding)
+					if verbose {
+						fmt.Printf("  Embedding generated (dimensions: %d)\n", len(embedding))
+					}
 				}
 			}
 
@@ -209,15 +235,23 @@ func AddManualURL(cfg *config.Config, url string) error {
 
 	// Summarize
 	summarizer := NewSummarizer(cfg)
-	if result, err := summarizer.Summarize(content); err == nil && result != nil {
+	result, err := summarizer.Summarize(content)
+	if err != nil {
+		fmt.Printf("Warning: summarization failed: %v\n", err)
+	} else if result != nil {
 		b.Summary = result.Summary
 		b.Keywords = result.Keywords
 	}
 
 	// Embed
-	if embedder, err := NewEmbedder(cfg); err == nil {
+	embedder, errEmbed := NewEmbedder(cfg)
+	if errEmbed != nil {
+		fmt.Printf("Warning: embedder not available: %v\n", errEmbed)
+	} else {
 		textToEmbed := b.Title + " " + b.Summary + " " + b.Keywords
-		if embedding, err := embedder.Embed(textToEmbed); err == nil {
+		if embedding, err := embedder.Embed(textToEmbed); err != nil {
+			fmt.Printf("Warning: embedding failed: %v\n", err)
+		} else {
 			store.UpdateEmbedding(b.ID, embedding)
 		}
 	}

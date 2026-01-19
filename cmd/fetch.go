@@ -8,6 +8,8 @@ import (
 	"github.com/user/xhub/internal/indexer"
 )
 
+var verboseFlag bool
+
 var fetchCmd = &cobra.Command{
 	Use:   "fetch",
 	Short: "Fetch and index bookmarks from all sources",
@@ -17,10 +19,11 @@ var fetchCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
 		}
-		return indexer.Fetch(cfg, true) // force refresh
+		return indexer.Fetch(cfg, true, verboseFlag) // force refresh
 	},
 }
 
 func init() {
+	fetchCmd.Flags().BoolVarP(&verboseFlag, "verbose", "v", false, "Show detailed processing steps")
 	rootCmd.AddCommand(fetchCmd)
 }
