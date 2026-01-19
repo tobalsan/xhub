@@ -205,6 +205,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.searching {
 				m.searching = false
 				m.searchInput.Blur()
+				return m, nil
 			}
 		case "tab":
 			if m.editing {
