@@ -3,6 +3,7 @@ package sources
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 
@@ -44,11 +45,25 @@ type birdResponse struct {
 func (t *TwitterSource) Fetch() ([]db.Bookmark, error) {
 	// Use bird CLI to fetch all bookmarks with --all --json
 	// bird bookmarks --all --json returns { tweets: [...], nextCursor: "..." }
-	cmd := exec.Command("bird", "bookmarks", "--all", "--json")
-
-	output, err := cmd.Output()
+	//
+	// NOTE: We write to a temp file because bird CLI output can exceed 64KB,
+	// and Go's exec.Command().Output() truncates large outputs from some CLIs.
+	tmpFile, err := os.CreateTemp("", "bird-*.json")
 	if err != nil {
+		return nil, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+	defer os.Remove(tmpPath)
+
+	cmd := exec.Command("sh", "-c", fmt.Sprintf("bird bookmarks --all --json > %s", tmpPath))
+	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("bird bookmarks failed: %w", err)
+	}
+
+	output, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read bird output: %w", err)
 	}
 
 	// Parse response - bird returns { tweets: [...], nextCursor: "..." } when using --all
@@ -66,8 +81,9 @@ func (t *TwitterSource) Fetch() ([]db.Bookmark, error) {
 	for _, tweet := range resp.Tweets {
 		createdAt := time.Now()
 		if tweet.CreatedAt != "" {
-			// bird uses ISO 8601 format
-			if parsed, err := time.Parse(time.RFC3339, tweet.CreatedAt); err == nil {
+			// bird uses Twitter's Ruby-style format: "Mon Jan 02 15:04:05 +0000 2006"
+			const twitterTimeFormat = "Mon Jan 02 15:04:05 -0700 2006"
+			if parsed, err := time.Parse(twitterTimeFormat, tweet.CreatedAt); err == nil {
 				createdAt = parsed
 			}
 		}
