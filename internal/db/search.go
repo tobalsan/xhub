@@ -31,11 +31,6 @@ func (s *Store) Search(query string, limit int) ([]Bookmark, error) {
 	// Combine results using reciprocal rank fusion
 	combined := hybridRank(ftsResults, vecResults)
 
-	// If no results from search, fall back to listing all bookmarks
-	if len(combined) == 0 {
-		return s.List(nil, limit)
-	}
-
 	// Limit results
 	if len(combined) > limit {
 		combined = combined[:limit]
