@@ -13,9 +13,12 @@ func (s *Store) Search(query string, limit int) ([]Bookmark, error) {
 	}
 
 	// Get FTS results with BM25 scores
+	// FTS5 can fail on special characters (spaces, quotes, operators)
+	// Gracefully fall back to listing if FTS fails
 	ftsResults, err := s.ftsSearch(query, 50)
 	if err != nil {
-		return nil, err
+		// Fall back to simple listing when FTS5 query fails
+		ftsResults = nil
 	}
 
 	// Get vector results (if embeddings available)
