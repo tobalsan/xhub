@@ -57,29 +57,6 @@ func (s *Store) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_bookmarks_source ON bookmarks(source);
 	CREATE INDEX IF NOT EXISTS idx_bookmarks_scrape_status ON bookmarks(scrape_status);
 
-	CREATE VIRTUAL TABLE IF NOT EXISTS bookmarks_fts USING fts5(
-		title, summary, keywords, notes,
-		content='bookmarks',
-		content_rowid='rowid'
-	);
-
-	CREATE TRIGGER IF NOT EXISTS bookmarks_ai AFTER INSERT ON bookmarks BEGIN
-		INSERT INTO bookmarks_fts(rowid, title, summary, keywords, notes)
-		VALUES (new.rowid, new.title, new.summary, new.keywords, new.notes);
-	END;
-
-	CREATE TRIGGER IF NOT EXISTS bookmarks_ad AFTER DELETE ON bookmarks BEGIN
-		INSERT INTO bookmarks_fts(bookmarks_fts, rowid, title, summary, keywords, notes)
-		VALUES ('delete', old.rowid, old.title, old.summary, old.keywords, old.notes);
-	END;
-
-	CREATE TRIGGER IF NOT EXISTS bookmarks_au AFTER UPDATE ON bookmarks BEGIN
-		INSERT INTO bookmarks_fts(bookmarks_fts, rowid, title, summary, keywords, notes)
-		VALUES ('delete', old.rowid, old.title, old.summary, old.keywords, old.notes);
-		INSERT INTO bookmarks_fts(rowid, title, summary, keywords, notes)
-		VALUES (new.rowid, new.title, new.summary, new.keywords, new.notes);
-	END;
-
 	CREATE TABLE IF NOT EXISTS bookmarks_vec (
 		id TEXT PRIMARY KEY,
 		embedding BLOB
@@ -92,7 +69,102 @@ func (s *Store) migrate() error {
 	`
 
 	_, err := s.db.Exec(schema)
+	if err != nil {
+		return err
+	}
+
+	// Check if FTS table needs to be rebuilt (add url column)
+	return s.migrateFTS()
+}
+
+func (s *Store) migrateFTS() error {
+	// Check if bookmarks_fts table exists and has url column
+	var tableName string
+	err := s.db.QueryRow(`
+		SELECT name FROM sqlite_master 
+		WHERE type='table' AND name='bookmarks_fts'
+	`).Scan(&tableName)
+	if err != nil {
+		// FTS table doesn't exist, create it fresh
+		return s.createFTSTable()
+	}
+
+	// Check if url column exists
+	var colName string
+	err = s.db.QueryRow(`
+		SELECT name FROM pragma_table_info('bookmarks_fts') 
+		WHERE name='url'
+	`).Scan(&colName)
+	if err != nil {
+		// url column doesn't exist, need to rebuild FTS table
+		return s.rebuildFTSTable()
+	}
+
+	return nil
+}
+
+func (s *Store) createFTSTable() error {
+	schema := `
+	CREATE VIRTUAL TABLE IF NOT EXISTS bookmarks_fts USING fts5(
+		title, summary, keywords, notes, url,
+		content='bookmarks',
+		content_rowid='rowid'
+	);
+
+	CREATE TRIGGER IF NOT EXISTS bookmarks_ai AFTER INSERT ON bookmarks BEGIN
+		INSERT INTO bookmarks_fts(rowid, title, summary, keywords, notes, url)
+		VALUES (new.rowid, new.title, new.summary, new.keywords, new.notes, new.url);
+	END;
+
+	CREATE TRIGGER IF NOT EXISTS bookmarks_ad AFTER DELETE ON bookmarks BEGIN
+		INSERT INTO bookmarks_fts(bookmarks_fts, rowid, title, summary, keywords, notes, url)
+		VALUES ('delete', old.rowid, old.title, old.summary, old.keywords, old.notes, old.url);
+	END;
+
+	CREATE TRIGGER IF NOT EXISTS bookmarks_au AFTER UPDATE ON bookmarks BEGIN
+		INSERT INTO bookmarks_fts(bookmarks_fts, rowid, title, summary, keywords, notes, url)
+		VALUES ('delete', old.rowid, old.title, old.summary, old.keywords, old.notes, old.url);
+		INSERT INTO bookmarks_fts(rowid, title, summary, keywords, notes, url)
+		VALUES (new.rowid, new.title, new.summary, new.keywords, new.notes, new.url);
+	END;
+	`
+
+	_, err := s.db.Exec(schema)
+	if err != nil {
+		return err
+	}
+
+	// Populate FTS table with existing data
+	_, err = s.db.Exec(`
+		INSERT INTO bookmarks_fts(rowid, title, summary, keywords, notes, url)
+		SELECT rowid, title, summary, keywords, notes, url FROM bookmarks
+	`)
 	return err
+}
+
+func (s *Store) rebuildFTSTable() error {
+	// Drop old triggers
+	_, err := s.db.Exec(`DROP TRIGGER IF EXISTS bookmarks_ai`)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`DROP TRIGGER IF EXISTS bookmarks_ad`)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec(`DROP TRIGGER IF EXISTS bookmarks_au`)
+	if err != nil {
+		return err
+	}
+
+	// Drop old FTS table
+	_, err = s.db.Exec(`DROP TABLE IF EXISTS bookmarks_fts`)
+	if err != nil {
+		return err
+	}
+
+	// Create new FTS table with url column
+	return s.createFTSTable()
 }
 
 func generateID(url string) string {

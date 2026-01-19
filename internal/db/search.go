@@ -4,7 +4,24 @@ import (
 	"database/sql"
 	"math"
 	"sort"
+	"strings"
 )
+
+// addPrefixWildcard adds a wildcard to the end of each search term for partial matching
+// e.g., "matt pocock" -> "matt* pocock*"
+func addPrefixWildcard(query string) string {
+	// Split by whitespace and add * to each term
+	terms := strings.Fields(query)
+	if len(terms) == 0 {
+		return query
+	}
+
+	for i := range terms {
+		terms[i] += "*"
+	}
+
+	return strings.Join(terms, " ")
+}
 
 // Search performs hybrid search combining BM25 (FTS5) and vector similarity
 func (s *Store) Search(query string, limit int) ([]Bookmark, error) {
@@ -57,6 +74,9 @@ type scoredResult struct {
 
 func (s *Store) ftsSearch(query string, limit int) ([]scoredResult, error) {
 	// FTS5 search with BM25 ranking
+	// Add wildcard for partial matching (e.g., "matt" -> "matt*")
+	query = addPrefixWildcard(query)
+
 	sqlQuery := `
 		SELECT b.id, bm25(bookmarks_fts) as score
 		FROM bookmarks_fts
