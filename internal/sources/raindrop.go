@@ -9,10 +9,14 @@ import (
 	"github.com/user/xhub/internal/db"
 )
 
-type RaindropSource struct{}
+const raindropLastSyncKey = "raindrop_last_sync_ts"
 
-func NewRaindropSource() *RaindropSource {
-	return &RaindropSource{}
+type RaindropSource struct {
+	store *db.Store
+}
+
+func NewRaindropSource(store *db.Store) *RaindropSource {
+	return &RaindropSource{store: store}
 }
 
 func (r *RaindropSource) Name() string {
@@ -35,11 +39,22 @@ type raindropItem struct {
 }
 
 func (r *RaindropSource) Fetch() ([]db.Bookmark, error) {
+	// Get last sync timestamp for incremental fetch
+	var lastSyncTime time.Time
+	if r.store != nil {
+		if ts, _ := r.store.GetMetadata(raindropLastSyncKey); ts != "" {
+			lastSyncTime, _ = time.Parse(time.RFC3339, ts)
+		}
+	}
+
 	var allItems []raindropItem
+	var newestTime time.Time
 	page := 0
 	limit := 50 // max per page
+	reachedOld := false
 
 	for {
+		// Raindrop CLI sorts by -created (newest first) by default
 		cmd := exec.Command("raindrop", "list", "--json", "--limit", "50", "--page", itoa(page))
 		output, err := cmd.Output()
 		if err != nil {
@@ -67,12 +82,43 @@ func (r *RaindropSource) Fetch() ([]db.Bookmark, error) {
 			break
 		}
 
-		allItems = append(allItems, items...)
+		for _, item := range items {
+			itemTime := time.Now()
+			if item.Created != "" {
+				if t, err := time.Parse(time.RFC3339, item.Created); err == nil {
+					itemTime = t
+				}
+			}
+			// Truncate to seconds for consistent comparison (RFC3339 loses sub-second precision)
+			itemTimeSec := itemTime.Truncate(time.Second)
+
+			// Track newest item for next sync
+			if newestTime.IsZero() || itemTimeSec.After(newestTime) {
+				newestTime = itemTimeSec
+			}
+
+			// Stop if we've reached items from before last sync
+			if !lastSyncTime.IsZero() && !itemTimeSec.After(lastSyncTime) {
+				reachedOld = true
+				break
+			}
+
+			allItems = append(allItems, item)
+		}
+
+		if reachedOld {
+			break
+		}
 
 		if len(items) < limit {
 			break // last page
 		}
 		page++
+	}
+
+	// Update last sync timestamp
+	if r.store != nil && !newestTime.IsZero() {
+		r.store.SetMetadata(raindropLastSyncKey, newestTime.Format(time.RFC3339))
 	}
 
 	bookmarks := make([]db.Bookmark, 0, len(allItems))

@@ -51,7 +51,7 @@ func Fetch(cfg *config.Config, force bool) error {
 		}
 	}
 	if cfg.Sources.Raindrop {
-		src := sources.NewRaindropSource()
+		src := sources.NewRaindropSource(store)
 		if src.Available() {
 			srcs = append(srcs, src)
 		} else {
