@@ -238,7 +238,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.searching && !m.editing {
 				m.searching = true
 				m.searchInput.Focus()
-				return m, textinput.Blink
+				return m, nil
 			}
 		case "enter":
 			if m.editing {
