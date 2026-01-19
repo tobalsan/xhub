@@ -45,12 +45,24 @@ type bookmarkItem struct {
 
 func (b bookmarkItem) Title() string {
 	icon := sourceIcon(b.bookmark.Source)
-	return fmt.Sprintf("%s %s", icon, b.bookmark.Title)
+	title := sanitizeLine(b.bookmark.Title)
+	return fmt.Sprintf("%s %s", icon, title)
+}
+
+// sanitizeLine removes newlines and collapses whitespace to ensure single-line display
+func sanitizeLine(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	// Collapse multiple spaces
+	for strings.Contains(s, "  ") {
+		s = strings.ReplaceAll(s, "  ", " ")
+	}
+	return strings.TrimSpace(s)
 }
 
 func (b bookmarkItem) Description() string {
 	if b.bookmark.Summary != "" {
-		summary := b.bookmark.Summary
+		summary := sanitizeLine(b.bookmark.Summary)
 		if len(summary) > 80 {
 			summary = summary[:80] + "..."
 		}
@@ -87,6 +99,7 @@ func initialModel(cfg *config.Config) model {
 	ti.Width = 50
 
 	delegate := list.NewDefaultDelegate()
+	delegate.SetHeight(2) // Fixed height: title + description
 	l := list.New([]list.Item{}, delegate, 0, 0)
 	l.Title = "XHub"
 	l.SetShowStatusBar(true)
