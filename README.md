@@ -24,7 +24,12 @@ npm install -g @raindrop/cli       # Raindrop CLI
 
 # Set API keys
 export OPENAI_API_KEY=sk-...       # Required for embeddings
-export ANTHROPIC_API_KEY=sk-ant-... # Required for summaries
+
+# LLM provider for summarization (choose one):
+export ANTHROPIC_API_KEY=sk-ant-...    # Anthropic
+export OPENROUTER_API_KEY=sk-or-...    # OpenRouter
+export CEREBRAS_API_KEY=...            # Cerebras
+export ZAI_API_KEY=...                 # Z.AI
 ```
 
 ### Build
@@ -55,6 +60,43 @@ sources:
   raindrop: true
   github: true
 ```
+
+#### LLM Provider Options
+
+**Anthropic (default)**
+```yaml
+llm:
+  provider: anthropic
+  model: claude-haiku-4-5-20251001
+```
+Set `ANTHROPIC_API_KEY` environment variable.
+
+**OpenRouter**
+```yaml
+llm:
+  provider: openrouter
+  model: anthropic/claude-haiku-4-5-20251001
+  base_url: https://openrouter.ai/api/v1
+```
+Set `OPENROUTER_API_KEY` environment variable.
+
+**Cerebras**
+```yaml
+llm:
+  provider: cerebras
+  model: llama3.1-70b
+  base_url: https://api.cerebras.ai/v1
+```
+Set `CEREBRAS_API_KEY` environment variable.
+
+**Z.AI**
+```yaml
+llm:
+  provider: zai
+  model: <model-name>
+  base_url: https://<zai-endpoint>/v1
+```
+Set `ZAI_API_KEY` environment variable.
 
 ## Usage
 

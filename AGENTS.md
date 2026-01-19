@@ -19,7 +19,12 @@ Must use `-tags "fts5"` for SQLite FTS5 support. Already configured in Makefile.
 - `raindrop` CLI for Raindrop bookmarks
 - `bird` CLI for X/Twitter bookmarks (optional)
 - `OPENAI_API_KEY` for embeddings
-- `ANTHROPIC_API_KEY` for summarization
+- LLM provider API key for summarization (choose one):
+  - `ANTHROPIC_API_KEY` for Anthropic
+  - `OPENAI_API_KEY` for OpenAI
+  - `OPENROUTER_API_KEY` for OpenRouter
+  - `CEREBRAS_API_KEY` for Cerebras
+  - `ZAI_API_KEY` for ZAI
 - bird CLI requires X.com cookies in Safari/Chrome/Firefox (run `bird whoami` to verify auth)
 
 ## Data Location
