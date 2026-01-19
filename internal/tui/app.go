@@ -329,6 +329,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.store = msg.store
 		m.allBookmarks = msg.bookmarks
 		m.list.SetItems(m.bookmarksToItems(msg.bookmarks))
+		return m, nil
 
 	case searchMsg:
 		if msg.err != nil {
@@ -337,6 +338,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.allBookmarks = msg.bookmarks
 		m.list.SetItems(m.bookmarksToItems(msg.bookmarks))
+		return m, nil
 
 	case refreshMsg:
 		if msg.err != nil {
@@ -398,10 +400,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.searchInput, cmd = m.searchInput.Update(msg)
 		cmds = append(cmds, cmd)
 
-		// Live search on input change
-		if len(m.searchInput.Value()) > 0 {
-			cmds = append(cmds, m.doSearch(m.searchInput.Value()))
-		}
+		// Live search on input change (including when empty to restore full list)
+		cmds = append(cmds, m.doSearch(m.searchInput.Value()))
 	} else {
 		var cmd tea.Cmd
 		m.list, cmd = m.list.Update(msg)
