@@ -1,9 +1,9 @@
 package cmd
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
-	"strconv"
 
 	"github.com/spf13/cobra"
 	"github.com/user/xhub/internal/config"
@@ -14,6 +14,7 @@ import (
 var (
 	resumVerboseFlag bool
 	resumLimitFlag  int
+	resumAllFlag    bool
 	resummarizeCmd = &cobra.Command{
 		Use:   "resummarize",
 		Short: "Regenerate summaries for existing bookmarks",
@@ -23,7 +24,11 @@ var (
 			if err != nil {
 				return fmt.Errorf("failed to load config: %w", err)
 			}
-			return Resummarize(cfg, resumLimitFlag, resumVerboseFlag)
+			limit := resumLimitFlag
+			if resumAllFlag {
+				limit = 0 // 0 means process all
+			}
+			return Resummarize(cfg, limit, resumVerboseFlag)
 		},
 	}
 )
@@ -31,6 +36,7 @@ var (
 func init() {
 	resummarizeCmd.Flags().BoolVarP(&resumVerboseFlag, "verbose", "v", false, "Show detailed processing steps")
 	resummarizeCmd.Flags().IntVarP(&resumLimitFlag, "limit", "l", 10, "Number of bookmarks to process (default: 10)")
+	resummarizeCmd.Flags().BoolVarP(&resumAllFlag, "all", "a", false, "Process all bookmarks (overrides --limit)")
 	rootCmd.AddCommand(resummarizeCmd)
 }
 
@@ -139,10 +145,18 @@ func getBookmarksNeedingSummary(store *db.Store, limit int) ([]db.Bookmark, erro
 		AND (summary = '' OR summary IS NULL)
 		AND hidden = 0
 		ORDER BY updated_at DESC
-		LIMIT ?
 	`
 
-	rows, err := store.DB().Query(query, strconv.Itoa(limit))
+	var rows *sql.Rows
+	var err error
+
+	if limit > 0 {
+		query += " LIMIT ?"
+		rows, err = store.DB().Query(query, limit)
+	} else {
+		rows, err = store.DB().Query(query)
+	}
+
 	if err != nil {
 		return nil, err
 	}
