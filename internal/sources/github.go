@@ -38,10 +38,10 @@ type ghStar struct {
 	} `json:"repo"`
 }
 
-func (g *GitHubSource) Fetch() ([]db.Bookmark, error) {
+func (g *GitHubSource) Fetch(incremental bool) ([]db.Bookmark, error) {
 	// Get last sync timestamp for incremental fetch
 	var lastSyncTime time.Time
-	if g.store != nil {
+	if incremental && g.store != nil {
 		if ts, _ := g.store.GetMetadata(githubLastSyncKey); ts != "" {
 			lastSyncTime, _ = time.Parse(time.RFC3339, ts)
 		}

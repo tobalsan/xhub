@@ -169,9 +169,9 @@ func (m model) initStore() tea.Msg {
 	}
 
 	if needsRefresh {
-		// Run refresh in background
+		// Run refresh in background (incremental)
 		go func() {
-			indexer.Fetch(m.cfg, false, false)
+			indexer.Fetch(m.cfg, indexer.FetchOptions{})
 		}()
 	}
 

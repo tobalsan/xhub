@@ -11,30 +11,39 @@ import (
 
 const lastRefreshKey = "last_refresh_at"
 
-// Fetch fetches and indexes bookmarks from all enabled sources
-func Fetch(cfg *config.Config, force bool, verbose bool) error {
+// FetchOptions configures fetch behavior
+type FetchOptions struct {
+	Force   bool     // Full reimport (vs incremental)
+	Verbose bool     // Show detailed processing steps
+	Sources []string // Filter to specific sources (empty = all)
+}
+
+// Fetch fetches and indexes bookmarks from enabled sources
+func Fetch(cfg *config.Config, opts FetchOptions) error {
 	store, err := db.NewStore(cfg.DataDir)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer store.Close()
 
-	// Check if refresh needed (once per day unless forced)
-	if !force {
-		lastRefresh, _ := store.GetMetadata(lastRefreshKey)
-		if lastRefresh != "" {
-			if t, err := time.Parse(time.RFC3339, lastRefresh); err == nil {
-				if time.Since(t) < 24*time.Hour {
-					fmt.Println("Already refreshed today. Use 'xhub fetch' to force refresh.")
-					return nil
-				}
-			}
+	// Build source filter set
+	sourceFilter := make(map[string]bool)
+	for _, s := range opts.Sources {
+		sourceFilter[s] = true
+	}
+	filterEnabled := len(sourceFilter) > 0
+
+	// Helper to check if source is enabled
+	sourceEnabled := func(name string) bool {
+		if !filterEnabled {
+			return true
 		}
+		return sourceFilter[name]
 	}
 
 	// Collect enabled sources
 	var srcs []sources.Source
-	if cfg.Sources.GitHub {
+	if cfg.Sources.GitHub && sourceEnabled("github") {
 		src := sources.NewGitHubSource(store)
 		if src.Available() {
 			srcs = append(srcs, src)
@@ -42,7 +51,7 @@ func Fetch(cfg *config.Config, force bool, verbose bool) error {
 			fmt.Println("Warning: gh CLI not found, skipping GitHub")
 		}
 	}
-	if cfg.Sources.X {
+	if cfg.Sources.X && sourceEnabled("x") {
 		src := sources.NewTwitterSource(store)
 		if src.Available() {
 			srcs = append(srcs, src)
@@ -50,7 +59,7 @@ func Fetch(cfg *config.Config, force bool, verbose bool) error {
 			fmt.Println("Warning: bird CLI not found, skipping X/Twitter")
 		}
 	}
-	if cfg.Sources.Raindrop {
+	if cfg.Sources.Raindrop && sourceEnabled("raindrop") {
 		src := sources.NewRaindropSource(store)
 		if src.Available() {
 			srcs = append(srcs, src)
@@ -75,10 +84,13 @@ func Fetch(cfg *config.Config, force bool, verbose bool) error {
 	var totalItems int
 
 	// Fetch from each source
+	// incremental = !force (default is incremental)
+	incremental := !opts.Force
+
 	for _, src := range srcs {
 		fmt.Printf("Fetching from %s...\n", src.Name())
 
-		bookmarks, err := src.Fetch()
+		bookmarks, err := src.Fetch(incremental)
 		if err != nil {
 			fmt.Printf("Error fetching from %s: %v\n", src.Name(), err)
 			continue
@@ -113,12 +125,12 @@ func Fetch(cfg *config.Config, force bool, verbose bool) error {
 
 			// Scrape content
 			if b.RawContent == "" {
-				if verbose {
+				if opts.Verbose {
 					fmt.Printf("\n  Scraping: %s\n", b.URL)
 				}
 				content, err := scraper.Scrape(b.URL)
 				if err != nil {
-					if verbose {
+					if opts.Verbose {
 						fmt.Printf("  Scraping failed: %v\n", err)
 					}
 					b.ScrapeStatus = "failed"
@@ -126,14 +138,14 @@ func Fetch(cfg *config.Config, force bool, verbose bool) error {
 					continue
 				}
 				b.RawContent = content
-				if verbose {
+				if opts.Verbose {
 					fmt.Printf("  Scraped %d characters\n", len(content))
 				}
 			}
 
 			// Summarize
 			if b.Summary == "" && summarizer != nil {
-				if verbose {
+				if opts.Verbose {
 					fmt.Printf("  Summarizing...\n")
 				}
 				result, err := summarizer.Summarize(b.RawContent)
@@ -144,7 +156,7 @@ func Fetch(cfg *config.Config, force bool, verbose bool) error {
 					if b.Keywords == "" {
 						b.Keywords = result.Keywords
 					}
-					if verbose {
+					if opts.Verbose {
 						fmt.Printf("  Summary: %s\n", result.Summary)
 						fmt.Printf("  Keywords: %s\n", result.Keywords)
 					}
@@ -153,7 +165,7 @@ func Fetch(cfg *config.Config, force bool, verbose bool) error {
 
 			// Generate embedding
 			if embedder != nil {
-				if verbose {
+				if opts.Verbose {
 					fmt.Printf("  Generating embedding...\n")
 				}
 				textToEmbed := b.Title + " " + b.Summary + " " + b.Keywords
@@ -161,7 +173,7 @@ func Fetch(cfg *config.Config, force bool, verbose bool) error {
 					fmt.Printf("Warning: embedding failed for %s: %v\n", b.URL, err)
 				} else {
 					store.UpdateEmbedding(b.ID, embedding)
-					if verbose {
+					if opts.Verbose {
 						fmt.Printf("  Embedding generated (dimensions: %d)\n", len(embedding))
 					}
 				}

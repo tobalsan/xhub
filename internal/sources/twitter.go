@@ -46,10 +46,10 @@ type birdResponse struct {
 	NextCursor string         `json:"nextCursor"`
 }
 
-func (t *TwitterSource) Fetch() ([]db.Bookmark, error) {
+func (t *TwitterSource) Fetch(incremental bool) ([]db.Bookmark, error) {
 	// Get last sync timestamp for incremental fetch
 	var lastSyncTime time.Time
-	if t.store != nil {
+	if incremental && t.store != nil {
 		if ts, _ := t.store.GetMetadata(xLastSyncKey); ts != "" {
 			lastSyncTime, _ = time.Parse(time.RFC3339, ts)
 		}

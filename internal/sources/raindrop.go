@@ -38,10 +38,10 @@ type raindropItem struct {
 	Tags    []string `json:"tags"`
 }
 
-func (r *RaindropSource) Fetch() ([]db.Bookmark, error) {
+func (r *RaindropSource) Fetch(incremental bool) ([]db.Bookmark, error) {
 	// Get last sync timestamp for incremental fetch
 	var lastSyncTime time.Time
-	if r.store != nil {
+	if incremental && r.store != nil {
 		if ts, _ := r.store.GetMetadata(raindropLastSyncKey); ts != "" {
 			lastSyncTime, _ = time.Parse(time.RFC3339, ts)
 		}

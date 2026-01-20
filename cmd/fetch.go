@@ -2,13 +2,18 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/user/xhub/internal/config"
 	"github.com/user/xhub/internal/indexer"
 )
 
-var verboseFlag bool
+var (
+	verboseFlag bool
+	forceFlag   bool
+	sourceFlag  []string
+)
 
 var fetchCmd = &cobra.Command{
 	Use:   "fetch",
@@ -19,11 +24,24 @@ var fetchCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to load config: %w", err)
 		}
-		return indexer.Fetch(cfg, true, verboseFlag) // force refresh
+
+		// Normalize source names
+		var sources []string
+		for _, s := range sourceFlag {
+			sources = append(sources, strings.ToLower(strings.TrimSpace(s)))
+		}
+
+		return indexer.Fetch(cfg, indexer.FetchOptions{
+			Force:   forceFlag,
+			Verbose: verboseFlag,
+			Sources: sources,
+		})
 	},
 }
 
 func init() {
 	fetchCmd.Flags().BoolVarP(&verboseFlag, "verbose", "v", false, "Show detailed processing steps")
+	fetchCmd.Flags().BoolVarP(&forceFlag, "force", "f", false, "Full reimport of all bookmarks from sources")
+	fetchCmd.Flags().StringSliceVarP(&sourceFlag, "source", "s", nil, "Filter to specific source(s): github, x, raindrop")
 	rootCmd.AddCommand(fetchCmd)
 }
