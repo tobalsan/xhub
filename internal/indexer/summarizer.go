@@ -61,7 +61,7 @@ func (s *Summarizer) Summarize(content string) (*SummaryResult, error) {
 	switch s.cfg.LLM.Provider {
 	case "anthropic":
 		response, err = s.summarizeWithAnthropic(prompt)
-	case "openai", "openrouter", "cerebras", "zai":
+	case "openai", "openrouter", "cerebras", "zai", "gemini":
 		response, err = s.summarizeWithOpenAI(prompt)
 	default:
 		return nil, fmt.Errorf("unsupported LLM provider: %s", s.cfg.LLM.Provider)
@@ -150,6 +150,15 @@ func (s *Summarizer) summarizeWithOpenAI(prompt string) (string, error) {
 			apiKey = s.cfg.LLM.APIKey
 		}
 		baseURL = s.cfg.LLM.BaseURL
+	case "gemini":
+		apiKey = os.Getenv("GEMINI_API_KEY")
+		if apiKey == "" {
+			apiKey = s.cfg.LLM.APIKey
+		}
+		baseURL = s.cfg.LLM.BaseURL
+		if baseURL == "" {
+			baseURL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+		}
 	default: // openai
 		apiKey = os.Getenv("OPENAI_API_KEY")
 		if apiKey == "" {

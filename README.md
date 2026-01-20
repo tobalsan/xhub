@@ -30,6 +30,7 @@ export ANTHROPIC_API_KEY=sk-ant-...    # Anthropic
 export OPENROUTER_API_KEY=sk-or-...    # OpenRouter
 export CEREBRAS_API_KEY=...            # Cerebras
 export ZAI_API_KEY=...                 # Z.AI
+export GEMINI_API_KEY=...              # Google Gemini
 ```
 
 ### Build
@@ -103,6 +104,16 @@ llm:
   api_key: <your-api-key>
 ```
 Set `ZAI_API_KEY` environment variable or `api_key` in config.
+
+**Google Gemini**
+```yaml
+llm:
+  provider: gemini
+  model: gemini-1.5-flash
+  base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+  api_key: <your-api-key>
+```
+Set `GEMINI_API_KEY` environment variable or `api_key` in config.
 
 **Embeddings (OpenAI)**
 ```yaml
