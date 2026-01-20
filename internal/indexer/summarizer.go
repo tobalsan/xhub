@@ -3,6 +3,7 @@ package indexer
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 
@@ -11,10 +12,18 @@ import (
 	"github.com/user/xhub/internal/config"
 )
 
+var debugMode bool
+
+// SetDebugMode enables debug logging for summarization
+func SetDebugMode(enabled bool) {
+	debugMode = enabled
+}
+
 // SummaryResult contains the LLM-generated summary and keywords
 type SummaryResult struct {
 	Summary  string
 	Keywords string
+	RawResponse string // For debugging purposes
 }
 
 // Summarizer generates summaries using LLM
@@ -62,7 +71,9 @@ func (s *Summarizer) Summarize(content string) (*SummaryResult, error) {
 		return nil, err
 	}
 
-	return parseResponse(response), nil
+	result := parseResponse(response)
+	result.RawResponse = response
+	return result, nil
 }
 
 func (s *Summarizer) summarizeWithAnthropic(prompt string) (string, error) {
@@ -73,9 +84,14 @@ func (s *Summarizer) summarizeWithAnthropic(prompt string) (string, error) {
 
 	client := anthropic.NewClient(apiKey)
 
+	if debugMode {
+		log.Printf("[DEBUG] Sending request to Anthropic with model %s", s.cfg.LLM.Model)
+		log.Printf("[DEBUG] Prompt length: %d chars", len(prompt))
+	}
+
 	resp, err := client.CreateMessages(context.Background(), anthropic.MessagesRequest{
 		Model:     anthropic.Model(s.cfg.LLM.Model),
-		MaxTokens: 500,
+		MaxTokens: 2000,
 		Messages: []anthropic.Message{
 			{
 				Role:    anthropic.RoleUser,
@@ -85,7 +101,17 @@ func (s *Summarizer) summarizeWithAnthropic(prompt string) (string, error) {
 	})
 
 	if err != nil {
+		if debugMode {
+			log.Printf("[DEBUG] Anthropic API Error: %v", err)
+		}
 		return "", err
+	}
+
+	if debugMode {
+		log.Printf("[DEBUG] Anthropic response received: %d content blocks", len(resp.Content))
+		if len(resp.Content) > 0 {
+			log.Printf("[DEBUG] Anthropic response text: %q", resp.Content[0].GetText())
+		}
 	}
 
 	if len(resp.Content) == 0 {
@@ -127,16 +153,33 @@ func (s *Summarizer) summarizeWithOpenAI(prompt string) (string, error) {
 
 	client := openai.NewClientWithConfig(config)
 
+	if debugMode {
+		log.Printf("[DEBUG] Sending request to %s with model %s", baseURL, s.cfg.LLM.Model)
+		log.Printf("[DEBUG] Prompt length: %d chars", len(prompt))
+	}
+
 	resp, err := client.CreateChatCompletion(context.Background(), openai.ChatCompletionRequest{
 		Model:     s.cfg.LLM.Model,
-		MaxTokens: 500,
+		MaxTokens: 2000,
 		Messages: []openai.ChatCompletionMessage{
 			{Role: openai.ChatMessageRoleUser, Content: prompt},
 		},
 	})
 
 	if err != nil {
+		if debugMode {
+			log.Printf("[DEBUG] API Error: %v", err)
+		}
 		return "", err
+	}
+
+	if debugMode {
+		log.Printf("[DEBUG] Response received: %d choices", len(resp.Choices))
+		if len(resp.Choices) > 0 {
+			log.Printf("[DEBUG] Response content: %q", resp.Choices[0].Message.Content)
+			log.Printf("[DEBUG] Full message: %+v", resp.Choices[0].Message)
+		}
+		log.Printf("[DEBUG] Full response object: %+v", resp)
 	}
 
 	if len(resp.Choices) == 0 {

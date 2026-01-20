@@ -13,6 +13,7 @@ import (
 
 var (
 	resumVerboseFlag bool
+	resumDebugFlag   bool
 	resumLimitFlag  int
 	resumAllFlag    bool
 	resummarizeCmd = &cobra.Command{
@@ -28,20 +29,26 @@ var (
 			if resumAllFlag {
 				limit = 0 // 0 means process all
 			}
-			return Resummarize(cfg, limit, resumVerboseFlag)
+			return Resummarize(cfg, limit, resumVerboseFlag, resumDebugFlag)
 		},
 	}
 )
 
 func init() {
 	resummarizeCmd.Flags().BoolVarP(&resumVerboseFlag, "verbose", "v", false, "Show detailed processing steps")
+	resummarizeCmd.Flags().BoolVarP(&resumDebugFlag, "debug", "d", false, "Show raw LLM responses for debugging")
 	resummarizeCmd.Flags().IntVarP(&resumLimitFlag, "limit", "l", 10, "Number of bookmarks to process (default: 10)")
 	resummarizeCmd.Flags().BoolVarP(&resumAllFlag, "all", "a", false, "Process all bookmarks (overrides --limit)")
 	rootCmd.AddCommand(resummarizeCmd)
 }
 
 // Resummarize regenerates summaries for bookmarks with raw content but missing summaries
-func Resummarize(cfg *config.Config, limit int, verbose bool) error {
+func Resummarize(cfg *config.Config, limit int, verbose bool, debug bool) error {
+	// Enable debug mode in summarizer
+	if debug {
+		indexer.SetDebugMode(true)
+	}
+
 	store, err := db.NewStore(cfg.DataDir)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
@@ -88,11 +95,23 @@ func Resummarize(cfg *config.Config, limit int, verbose bool) error {
 		result, err := summarizer.Summarize(b.RawContent)
 		if err != nil {
 			fmt.Printf("  Error: summarization failed: %v\n", err)
+			if verbose {
+				fmt.Printf("  Raw content preview: %s\n", truncateString(b.RawContent, 200))
+			}
+			if debug {
+				fmt.Printf("  Raw content: %s\n", truncateString(b.RawContent, 500))
+			}
 			continue
 		}
 
-		if result == nil {
-			fmt.Println("  Error: nil result from summarizer")
+		if result.Summary == "" {
+			fmt.Println("  Error: Empty summary generated from LLM")
+			if verbose {
+				fmt.Printf("  Raw content preview: %s\n", truncateString(b.RawContent, 200))
+			}
+			if debug {
+				fmt.Printf("  LLM Raw Response:\n%s\n", result.RawResponse)
+			}
 			continue
 		}
 
@@ -176,4 +195,11 @@ func getBookmarksNeedingSummary(store *db.Store, limit int) ([]db.Bookmark, erro
 	}
 
 	return bookmarks, rows.Err()
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
