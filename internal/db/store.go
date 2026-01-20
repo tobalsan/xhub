@@ -393,3 +393,60 @@ func (s *Store) GetAllWithEmbeddings() (map[string][]float32, error) {
 func (s *Store) DB() *sql.DB {
 	return s.db
 }
+
+// GetOrphanedBySource returns bookmarks from a source whose URLs are not in the given set.
+// Used to detect items that were removed from the source.
+func (s *Store) GetOrphanedBySource(source string, currentURLs []string) ([]Bookmark, error) {
+	if len(currentURLs) == 0 {
+		// If no URLs provided, all items from this source are orphaned
+		return s.getBookmarksBySource(source)
+	}
+
+	// Build URL set for exclusion
+	query := `SELECT id, source, url, title FROM bookmarks WHERE source = ? AND url NOT IN (`
+	args := []interface{}{source}
+	for i, url := range currentURLs {
+		if i > 0 {
+			query += ","
+		}
+		query += "?"
+		args = append(args, url)
+	}
+	query += `)`
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var orphans []Bookmark
+	for rows.Next() {
+		var b Bookmark
+		if err := rows.Scan(&b.ID, &b.Source, &b.URL, &b.Title); err != nil {
+			return nil, err
+		}
+		orphans = append(orphans, b)
+	}
+	return orphans, rows.Err()
+}
+
+// getBookmarksBySource returns all bookmarks from a given source.
+func (s *Store) getBookmarksBySource(source string) ([]Bookmark, error) {
+	query := `SELECT id, source, url, title FROM bookmarks WHERE source = ?`
+	rows, err := s.db.Query(query, source)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var bookmarks []Bookmark
+	for rows.Next() {
+		var b Bookmark
+		if err := rows.Scan(&b.ID, &b.Source, &b.URL, &b.Title); err != nil {
+			return nil, err
+		}
+		bookmarks = append(bookmarks, b)
+	}
+	return bookmarks, rows.Err()
+}

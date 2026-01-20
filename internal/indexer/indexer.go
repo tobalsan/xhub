@@ -108,6 +108,27 @@ func Fetch(cfg *config.Config, opts FetchOptions) error {
 		}
 		fmt.Println()
 
+		// On force fetch, detect and delete orphaned items
+		if opts.Force {
+			urls := make([]string, len(bookmarks))
+			for i, b := range bookmarks {
+				urls[i] = b.URL
+			}
+
+			orphans, err := store.GetOrphanedBySource(src.Name(), urls)
+			if err != nil {
+				fmt.Printf("Warning: could not check for orphans: %v\n", err)
+			} else if len(orphans) > 0 {
+				fmt.Printf("Removing %d orphaned items from %s:\n", len(orphans), src.Name())
+				for _, o := range orphans {
+					fmt.Printf("  - %s\n", o.URL)
+					if err := store.Delete(o.ID); err != nil {
+						fmt.Printf("    Error deleting: %v\n", err)
+					}
+				}
+			}
+		}
+
 		totalItems += len(bookmarks)
 	}
 
