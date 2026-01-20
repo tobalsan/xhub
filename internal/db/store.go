@@ -173,6 +173,12 @@ func generateID(url string) string {
 }
 
 func (s *Store) Upsert(b *Bookmark) error {
+	_, err := s.UpsertReturningNew(b)
+	return err
+}
+
+// UpsertReturningNew inserts or updates a bookmark and returns true if it was a new insert.
+func (s *Store) UpsertReturningNew(b *Bookmark) (bool, error) {
 	if b.ID == "" {
 		b.ID = generateID(b.URL)
 	}
@@ -181,6 +187,11 @@ func (s *Store) Upsert(b *Bookmark) error {
 	if b.CreatedAt.IsZero() {
 		b.CreatedAt = now
 	}
+
+	// Check if URL already exists
+	var existingID string
+	err := s.db.QueryRow(`SELECT id FROM bookmarks WHERE url = ?`, b.URL).Scan(&existingID)
+	isNew := err == sql.ErrNoRows
 
 	query := `
 	INSERT INTO bookmarks (id, source, url, title, summary, keywords, notes, raw_content, created_at, updated_at, scraped_at, scrape_status, hidden)
@@ -201,11 +212,11 @@ func (s *Store) Upsert(b *Bookmark) error {
 		scrapedAt = b.ScrapedAt
 	}
 
-	_, err := s.db.Exec(query,
+	_, err = s.db.Exec(query,
 		b.ID, b.Source, b.URL, b.Title, b.Summary, b.Keywords, b.Notes, b.RawContent,
 		b.CreatedAt, b.UpdatedAt, scrapedAt, b.ScrapeStatus, b.Hidden,
 	)
-	return err
+	return isNew, err
 }
 
 func (s *Store) Get(id string) (*Bookmark, error) {
@@ -449,4 +460,26 @@ func (s *Store) getBookmarksBySource(source string) ([]Bookmark, error) {
 		bookmarks = append(bookmarks, b)
 	}
 	return bookmarks, rows.Err()
+}
+
+// MarkForReprocess resets items to pending so they get re-scraped/re-summarized/re-embedded.
+// Clears raw_content, summary, keywords to force full reprocessing.
+func (s *Store) MarkForReprocess(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	query := `UPDATE bookmarks SET scrape_status = 'pending', raw_content = '', summary = '', keywords = '' WHERE id IN (`
+	args := make([]interface{}, len(ids))
+	for i, id := range ids {
+		if i > 0 {
+			query += ","
+		}
+		query += "?"
+		args[i] = id
+	}
+	query += `)`
+
+	_, err := s.db.Exec(query, args...)
+	return err
 }

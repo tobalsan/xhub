@@ -13,9 +13,10 @@ const lastRefreshKey = "last_refresh_at"
 
 // FetchOptions configures fetch behavior
 type FetchOptions struct {
-	Force   bool     // Full reimport (vs incremental)
-	Verbose bool     // Show detailed processing steps
-	Sources []string // Filter to specific sources (empty = all)
+	Force     bool     // Full reimport (vs incremental)
+	Reprocess bool     // Re-scrape, re-summarize, re-embed existing items
+	Verbose   bool     // Show detailed processing steps
+	Sources   []string // Filter to specific sources (empty = all)
 }
 
 // Fetch fetches and indexes bookmarks from enabled sources
@@ -87,6 +88,13 @@ func Fetch(cfg *config.Config, opts FetchOptions) error {
 	// incremental = !force (default is incremental)
 	incremental := !opts.Force
 
+	// Per-source stats
+	type sourceStats struct {
+		newItems     int
+		skippedItems int
+	}
+	stats := make(map[string]*sourceStats)
+
 	for _, src := range srcs {
 		fmt.Printf("Fetching from %s...\n", src.Name())
 
@@ -96,17 +104,35 @@ func Fetch(cfg *config.Config, opts FetchOptions) error {
 			continue
 		}
 
-		fmt.Printf("Found %d items from %s\n", len(bookmarks), src.Name())
+		stats[src.Name()] = &sourceStats{}
 
-		// Store bookmarks
+		// Store bookmarks and track new vs existing
+		var idsToReprocess []string
 		for i, b := range bookmarks {
-			if err := store.Upsert(&b); err != nil {
+			isNew, err := store.UpsertReturningNew(&b)
+			if err != nil {
 				fmt.Printf("Error storing bookmark: %v\n", err)
 				continue
+			}
+			if isNew {
+				stats[src.Name()].newItems++
+			} else {
+				stats[src.Name()].skippedItems++
+				// If reprocessing, collect existing item IDs
+				if opts.Reprocess {
+					idsToReprocess = append(idsToReprocess, b.ID)
+				}
 			}
 			printProgress(i+1, len(bookmarks), "Storing")
 		}
 		fmt.Println()
+
+		// Mark existing items for reprocessing if requested
+		if opts.Reprocess && len(idsToReprocess) > 0 {
+			if err := store.MarkForReprocess(idsToReprocess); err != nil {
+				fmt.Printf("Warning: could not mark items for reprocessing: %v\n", err)
+			}
+		}
 
 		// On force fetch, detect and delete orphaned items
 		if opts.Force {
@@ -130,6 +156,12 @@ func Fetch(cfg *config.Config, opts FetchOptions) error {
 		}
 
 		totalItems += len(bookmarks)
+	}
+
+	// Print per-source delta stats
+	fmt.Println()
+	for name, s := range stats {
+		fmt.Printf("Found %d new %s items, skipped %d existing\n", s.newItems, name, s.skippedItems)
 	}
 
 	// Process pending items (scrape, summarize, embed)

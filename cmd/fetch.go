@@ -10,9 +10,10 @@ import (
 )
 
 var (
-	verboseFlag bool
-	forceFlag   bool
-	sourceFlag  []string
+	verboseFlag   bool
+	forceFlag     bool
+	reprocessFlag bool
+	sourceFlag    []string
 )
 
 var fetchCmd = &cobra.Command{
@@ -32,9 +33,10 @@ var fetchCmd = &cobra.Command{
 		}
 
 		return indexer.Fetch(cfg, indexer.FetchOptions{
-			Force:   forceFlag,
-			Verbose: verboseFlag,
-			Sources: sources,
+			Force:     forceFlag,
+			Reprocess: reprocessFlag,
+			Verbose:   verboseFlag,
+			Sources:   sources,
 		})
 	},
 }
@@ -42,6 +44,7 @@ var fetchCmd = &cobra.Command{
 func init() {
 	fetchCmd.Flags().BoolVarP(&verboseFlag, "verbose", "v", false, "Show detailed processing steps")
 	fetchCmd.Flags().BoolVarP(&forceFlag, "force", "f", false, "Full reimport of all bookmarks from sources")
+	fetchCmd.Flags().BoolVarP(&reprocessFlag, "reprocess", "r", false, "Re-scrape, re-summarize, and re-embed existing items (use with --force)")
 	fetchCmd.Flags().StringSliceVarP(&sourceFlag, "source", "s", nil, "Filter to specific source(s): github, x, raindrop")
 	rootCmd.AddCommand(fetchCmd)
 }
