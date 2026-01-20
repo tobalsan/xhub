@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -95,6 +96,7 @@ func sourceIcon(source string) string {
 func initialModel(cfg *config.Config) model {
 	ti := textinput.New()
 	ti.Placeholder = "Search bookmarks..."
+	ti.Cursor.SetMode(cursor.CursorStatic)
 	// Start with list focused, not search input
 	ti.Blur()
 	ti.CharLimit = 256
@@ -228,14 +230,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.blurFocusedField()
 				m.editFocusIdx = (m.editFocusIdx + 1) % 4
 				m.focusField()
-				return m, textinput.Blink
+				return m, nil
 			}
 		case "shift+tab":
 			if m.editing {
 				m.blurFocusedField()
 				m.editFocusIdx = (m.editFocusIdx - 1 + 4) % 4
 				m.focusField()
-				return m, textinput.Blink
+				return m, nil
 			}
 		case "/":
 			if !m.searching && !m.editing {
@@ -261,7 +263,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.createEditFields(&bm)
 				m.editFocusIdx = 0
 				m.focusField()
-				return m, textinput.Blink
+				return m, nil
 			}
 		case "j", "down":
 			if !m.searching && !m.editing {
@@ -458,6 +460,7 @@ func (m *model) createEditFields(b *db.Bookmark) {
 	m.editInputs[0].SetValue(b.Title)
 	m.editInputs[0].CharLimit = 256
 	m.editInputs[0].Width = width - 26
+	m.editInputs[0].Cursor.SetMode(cursor.CursorStatic)
 
 	// Keywords
 	m.editInputs[1] = textinput.New()
@@ -465,6 +468,7 @@ func (m *model) createEditFields(b *db.Bookmark) {
 	m.editInputs[1].SetValue(b.Keywords)
 	m.editInputs[1].CharLimit = 256
 	m.editInputs[1].Width = width - 26
+	m.editInputs[1].Cursor.SetMode(cursor.CursorStatic)
 
 	// Initialize textareas (Summary, Notes)
 	m.editTextareas = make([]textarea.Model, 2)
@@ -487,6 +491,7 @@ func (m *model) createEditFields(b *db.Bookmark) {
 	m.editTextareas[0].SetWidth(fieldWidth)
 	m.editTextareas[0].SetHeight(summaryLines)
 	m.editTextareas[0].ShowLineNumbers = false
+	m.editTextareas[0].Cursor.SetMode(cursor.CursorStatic)
 
 	// Notes
 	notesLines := 5
@@ -503,6 +508,7 @@ func (m *model) createEditFields(b *db.Bookmark) {
 	m.editTextareas[1].SetWidth(fieldWidth)
 	m.editTextareas[1].SetHeight(notesLines)
 	m.editTextareas[1].ShowLineNumbers = false
+	m.editTextareas[1].Cursor.SetMode(cursor.CursorStatic)
 }
 
 func (m model) blurFocusedField() {
