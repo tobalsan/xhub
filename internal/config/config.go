@@ -18,12 +18,14 @@ type LLMConfig struct {
 	Provider string            `mapstructure:"provider"`
 	Model    string            `mapstructure:"model"`
 	BaseURL  string            `mapstructure:"base_url"`
+	APIKey   string            `mapstructure:"api_key"`
 	Headers  map[string]string `mapstructure:"headers"`
 }
 
 type EmbeddingsConfig struct {
 	Provider string `mapstructure:"provider"`
 	Model    string `mapstructure:"model"`
+	APIKey   string `mapstructure:"api_key"`
 }
 
 type SourcesConfig struct {

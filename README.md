@@ -61,6 +61,8 @@ sources:
   github: true
 ```
 
+**API Keys**: You can either set environment variables or add `api_key` directly in the config file. Environment variables take precedence over config values.
+
 #### LLM Provider Options
 
 **Anthropic (default)**
@@ -68,8 +70,9 @@ sources:
 llm:
   provider: anthropic
   model: claude-haiku-4-5-20251001
+  api_key: sk-ant-...
 ```
-Set `ANTHROPIC_API_KEY` environment variable.
+Set `ANTHROPIC_API_KEY` environment variable or `api_key` in config.
 
 **OpenRouter**
 ```yaml
@@ -77,8 +80,9 @@ llm:
   provider: openrouter
   model: anthropic/claude-haiku-4-5-20251001
   base_url: https://openrouter.ai/api/v1
+  api_key: sk-or-...
 ```
-Set `OPENROUTER_API_KEY` environment variable.
+Set `OPENROUTER_API_KEY` environment variable or `api_key` in config.
 
 **Cerebras**
 ```yaml
@@ -86,8 +90,9 @@ llm:
   provider: cerebras
   model: llama3.1-70b
   base_url: https://api.cerebras.ai/v1
+  api_key: csk-...
 ```
-Set `CEREBRAS_API_KEY` environment variable.
+Set `CEREBRAS_API_KEY` environment variable or `api_key` in config.
 
 **Z.AI**
 ```yaml
@@ -95,8 +100,18 @@ llm:
   provider: zai
   model: <model-name>
   base_url: https://<zai-endpoint>/v1
+  api_key: <your-api-key>
 ```
-Set `ZAI_API_KEY` environment variable.
+Set `ZAI_API_KEY` environment variable or `api_key` in config.
+
+**Embeddings (OpenAI)**
+```yaml
+embeddings:
+  provider: openai
+  model: text-embedding-3-small
+  api_key: sk-...
+```
+Set `OPENAI_API_KEY` environment variable or `api_key` in config.
 
 ## Usage
 

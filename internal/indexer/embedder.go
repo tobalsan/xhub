@@ -18,7 +18,10 @@ type Embedder struct {
 func NewEmbedder(cfg *config.Config) (*Embedder, error) {
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		return nil, fmt.Errorf("OPENAI_API_KEY not set")
+		apiKey = cfg.Embeddings.APIKey
+	}
+	if apiKey == "" {
+		return nil, fmt.Errorf("OPENAI_API_KEY not set (set in config.yaml or environment)")
 	}
 
 	client := openai.NewClient(apiKey)

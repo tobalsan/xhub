@@ -79,7 +79,10 @@ func (s *Summarizer) Summarize(content string) (*SummaryResult, error) {
 func (s *Summarizer) summarizeWithAnthropic(prompt string) (string, error) {
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 	if apiKey == "" {
-		return "", fmt.Errorf("ANTHROPIC_API_KEY not set")
+		apiKey = s.cfg.LLM.APIKey
+	}
+	if apiKey == "" {
+		return "", fmt.Errorf("ANTHROPIC_API_KEY not set (set in config.yaml or environment)")
 	}
 
 	client := anthropic.NewClient(apiKey)
@@ -128,22 +131,34 @@ func (s *Summarizer) summarizeWithOpenAI(prompt string) (string, error) {
 	switch s.cfg.LLM.Provider {
 	case "openrouter":
 		apiKey = os.Getenv("OPENROUTER_API_KEY")
+		if apiKey == "" {
+			apiKey = s.cfg.LLM.APIKey
+		}
 		baseURL = s.cfg.LLM.BaseURL
 		if baseURL == "" {
 			baseURL = "https://openrouter.ai/api/v1"
 		}
 	case "cerebras":
 		apiKey = os.Getenv("CEREBRAS_API_KEY")
+		if apiKey == "" {
+			apiKey = s.cfg.LLM.APIKey
+		}
 		baseURL = s.cfg.LLM.BaseURL
 	case "zai":
 		apiKey = os.Getenv("ZAI_API_KEY")
+		if apiKey == "" {
+			apiKey = s.cfg.LLM.APIKey
+		}
 		baseURL = s.cfg.LLM.BaseURL
 	default: // openai
 		apiKey = os.Getenv("OPENAI_API_KEY")
+		if apiKey == "" {
+			apiKey = s.cfg.LLM.APIKey
+		}
 	}
 
 	if apiKey == "" {
-		return "", fmt.Errorf("API key not set for provider %s", s.cfg.LLM.Provider)
+		return "", fmt.Errorf("API key not set for provider %s (set in config.yaml or environment)", s.cfg.LLM.Provider)
 	}
 
 	config := openai.DefaultConfig(apiKey)
