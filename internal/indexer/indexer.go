@@ -43,7 +43,7 @@ func Fetch(cfg *config.Config, force bool, verbose bool) error {
 		}
 	}
 	if cfg.Sources.X {
-		src := sources.NewTwitterSource()
+		src := sources.NewTwitterSource(store)
 		if src.Available() {
 			srcs = append(srcs, src)
 		} else {
