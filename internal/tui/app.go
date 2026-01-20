@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -31,7 +32,8 @@ type model struct {
 	// Edit modal state
 	editing       bool
 	editBookmark  *db.Bookmark
-	editFields    []textinput.Model // 0=title, 1=summary, 2=keywords, 3=notes
+	editInputs    []textinput.Model // 0=title, 2=keywords
+	editTextareas []textarea.Model // 1=summary, 3=notes
 	editFocusIdx  int
 
 	// Delete confirmation state
@@ -212,7 +214,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.editing {
 				m.editing = false
 				m.editBookmark = nil
-				m.editFields = nil
+				m.editInputs = nil
+				m.editTextareas = nil
 				return m, nil
 			}
 			if m.searching {
@@ -222,16 +225,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "tab":
 			if m.editing {
-				m.editFields[m.editFocusIdx].Blur()
-				m.editFocusIdx = (m.editFocusIdx + 1) % len(m.editFields)
-				m.editFields[m.editFocusIdx].Focus()
+				m.blurFocusedField()
+				m.editFocusIdx = (m.editFocusIdx + 1) % 4
+				m.focusField()
 				return m, textinput.Blink
 			}
 		case "shift+tab":
 			if m.editing {
-				m.editFields[m.editFocusIdx].Blur()
-				m.editFocusIdx = (m.editFocusIdx - 1 + len(m.editFields)) % len(m.editFields)
-				m.editFields[m.editFocusIdx].Focus()
+				m.blurFocusedField()
+				m.editFocusIdx = (m.editFocusIdx - 1 + 4) % 4
+				m.focusField()
 				return m, textinput.Blink
 			}
 		case "/":
@@ -255,9 +258,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.editing = true
 				bm := item.bookmark
 				m.editBookmark = &bm
-				m.editFields = m.createEditFields(&bm)
+				m.createEditFields(&bm)
 				m.editFocusIdx = 0
-				m.editFields[0].Focus()
+				m.focusField()
 				return m, textinput.Blink
 			}
 		case "j", "down":
@@ -367,7 +370,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case editSaveMsg:
 		m.editing = false
 		m.editBookmark = nil
-		m.editFields = nil
+		m.editInputs = nil
+		m.editTextareas = nil
 		if msg.err != nil {
 			m.err = msg.err
 			return m, nil
@@ -403,9 +407,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if m.editing {
 		// Update focused edit field
-		if m.editFields != nil && m.editFocusIdx < len(m.editFields) {
-			var cmd tea.Cmd
-			m.editFields[m.editFocusIdx], cmd = m.editFields[m.editFocusIdx].Update(msg)
+		var cmd tea.Cmd
+
+		// Update textinputs (Title, Keywords)
+		for i, input := range m.editInputs {
+			m.editInputs[i], cmd = input.Update(msg)
+			cmds = append(cmds, cmd)
+		}
+
+		// Update textareas (Summary, Notes)
+		for i, ta := range m.editTextareas {
+			m.editTextareas[i], cmd = ta.Update(msg)
 			cmds = append(cmds, cmd)
 		}
 	} else if m.searching {
@@ -430,54 +442,124 @@ func (m model) filterResults() tea.Msg {
 	return filterMsg{}
 }
 
-func (m model) createEditFields(b *db.Bookmark) []textinput.Model {
-	fields := make([]textinput.Model, 4)
+func (m *model) createEditFields(b *db.Bookmark) {
+	// Ensure we have valid dimensions
+	width := m.width
+	if width < 80 {
+		width = 80
+	}
+
+	// Initialize textinputs (Title, Keywords)
+	m.editInputs = make([]textinput.Model, 2)
 
 	// Title
-	fields[0] = textinput.New()
-	fields[0].Placeholder = "Title"
-	fields[0].SetValue(b.Title)
-	fields[0].CharLimit = 256
-	fields[0].Width = 60
-
-	// Summary
-	fields[1] = textinput.New()
-	fields[1].Placeholder = "Summary"
-	fields[1].SetValue(b.Summary)
-	fields[1].CharLimit = 500
-	fields[1].Width = 60
+	m.editInputs[0] = textinput.New()
+	m.editInputs[0].Placeholder = "Title"
+	m.editInputs[0].SetValue(b.Title)
+	m.editInputs[0].CharLimit = 256
+	m.editInputs[0].Width = width - 26
 
 	// Keywords
-	fields[2] = textinput.New()
-	fields[2].Placeholder = "Keywords (comma-separated)"
-	fields[2].SetValue(b.Keywords)
-	fields[2].CharLimit = 256
-	fields[2].Width = 60
+	m.editInputs[1] = textinput.New()
+	m.editInputs[1].Placeholder = "Keywords (comma-separated)"
+	m.editInputs[1].SetValue(b.Keywords)
+	m.editInputs[1].CharLimit = 256
+	m.editInputs[1].Width = width - 26
+
+	// Initialize textareas (Summary, Notes)
+	m.editTextareas = make([]textarea.Model, 2)
+
+	// Calculate textarea height (minimum 5, expand based on content)
+	fieldWidth := width - 26 - 4
+
+	// Summary
+	summaryLines := 5
+	if b.Summary != "" {
+		summaryLines = len(strings.Split(b.Summary, "\n"))
+		if summaryLines < 5 {
+			summaryLines = 5
+		}
+	}
+	m.editTextareas[0] = textarea.New()
+	m.editTextareas[0].Placeholder = "Summary"
+	m.editTextareas[0].SetValue(b.Summary)
+	m.editTextareas[0].CharLimit = 500
+	m.editTextareas[0].SetWidth(fieldWidth)
+	m.editTextareas[0].SetHeight(summaryLines)
+	m.editTextareas[0].ShowLineNumbers = false
 
 	// Notes
-	fields[3] = textinput.New()
-	fields[3].Placeholder = "Notes"
-	fields[3].SetValue(b.Notes)
-	fields[3].CharLimit = 500
-	fields[3].Width = 60
+	notesLines := 5
+	if b.Notes != "" {
+		notesLines = len(strings.Split(b.Notes, "\n"))
+		if notesLines < 5 {
+			notesLines = 5
+		}
+	}
+	m.editTextareas[1] = textarea.New()
+	m.editTextareas[1].Placeholder = "Notes"
+	m.editTextareas[1].SetValue(b.Notes)
+	m.editTextareas[1].CharLimit = 500
+	m.editTextareas[1].SetWidth(fieldWidth)
+	m.editTextareas[1].SetHeight(notesLines)
+	m.editTextareas[1].ShowLineNumbers = false
+}
 
-	return fields
+func (m model) blurFocusedField() {
+	if len(m.editInputs) < 2 || len(m.editTextareas) < 2 {
+		return
+	}
+
+	switch m.editFocusIdx {
+	case 0: // Title
+		m.editInputs[0].Blur()
+	case 1: // Summary
+		m.editTextareas[0].Blur()
+	case 2: // Keywords
+		m.editInputs[1].Blur()
+	case 3: // Notes
+		m.editTextareas[1].Blur()
+	}
+}
+
+func (m model) focusField() {
+	if len(m.editInputs) < 2 || len(m.editTextareas) < 2 {
+		return
+	}
+
+	switch m.editFocusIdx {
+	case 0: // Title
+		m.editInputs[0].Focus()
+	case 1: // Summary
+		m.editTextareas[0].Focus()
+	case 2: // Keywords
+		m.editInputs[1].Focus()
+	case 3: // Notes
+		m.editTextareas[1].Focus()
+	}
 }
 
 func (m model) saveEdit() tea.Cmd {
 	// Capture values before closure to avoid race conditions
-	if m.editBookmark == nil || m.store == nil || m.editFields == nil {
+	if m.editBookmark == nil || m.store == nil {
 		return func() tea.Msg {
 			return editSaveMsg{err: fmt.Errorf("no bookmark to save")}
 		}
 	}
 
+	// Ensure edit fields are initialized
+	if len(m.editInputs) < 2 || len(m.editTextareas) < 2 {
+		return func() tea.Msg {
+			return editSaveMsg{err: fmt.Errorf("edit fields not initialized")}
+		}
+	}
+
 	// Copy values from fields
 	bm := *m.editBookmark
-	bm.Title = m.editFields[0].Value()
-	bm.Summary = m.editFields[1].Value()
-	bm.Keywords = m.editFields[2].Value()
-	bm.Notes = m.editFields[3].Value()
+	bm.Title = m.editInputs[0].Value()
+	bm.Summary = m.editTextareas[0].Value()
+	bm.Keywords = m.editInputs[1].Value()
+	bm.Notes = m.editTextareas[1].Value()
 	store := m.store
 
 	return func() tea.Msg {
@@ -581,48 +663,103 @@ func (m model) View() string {
 }
 
 func (m model) renderEditModal() string {
+	// Guard: ensure edit fields are initialized
+	if len(m.editInputs) < 2 || len(m.editTextareas) < 2 {
+		return "Error: Edit fields not initialized. Press Esc to close."
+	}
+
+	// Use full window size with minimal padding
 	modalStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("62")).
 		Padding(1, 2).
-		Width(70)
+		Width(m.width - 4).
+		Height(m.height - 2)
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("86")).
 		MarginBottom(1)
 
+	urlStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("245")).
+		Width(m.width - 12).
+		MarginBottom(2)
+
 	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
-		Width(12)
+		Foreground(lipgloss.Color("245")).
+		Width(14)
 
 	focusedLabel := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("86")).
 		Bold(true).
-		Width(12)
+		Width(14)
+
+	// Input field with subtle border and padding
+	inputStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("240")).
+		Padding(0, 1).
+		Width(m.width - 26).
+		MarginBottom(1)
+
+	focusedInputStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("86")).
+		Padding(0, 1).
+		Width(m.width - 26).
+		MarginBottom(1)
 
 	helpStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("240")).
-		MarginTop(1)
+		MarginTop(2)
 
 	var content strings.Builder
 
 	content.WriteString(titleStyle.Render("Edit Bookmark"))
 	content.WriteString("\n")
-	content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(m.editBookmark.URL))
-	content.WriteString("\n\n")
+
+	// Wrap URL for display
+	wrappedURL := lipgloss.NewStyle().Width(m.width - 12).Render(m.editBookmark.URL)
+	content.WriteString(urlStyle.Render(wrappedURL))
+	content.WriteString("\n")
 
 	labels := []string{"Title:", "Summary:", "Keywords:", "Notes:"}
-	for i, field := range m.editFields {
+	for i := 0; i < 4; i++ {
 		var label string
+
 		if i == m.editFocusIdx {
 			label = focusedLabel.Render(labels[i])
 		} else {
 			label = labelStyle.Render(labels[i])
 		}
+
+		// Get appropriate field view based on index
+		var fieldView string
+		var isFocused bool
+
+		switch i {
+		case 0: // Title (textinput)
+			fieldView = m.editInputs[0].View()
+		case 1: // Summary (textarea)
+			fieldView = m.editTextareas[0].View()
+		case 2: // Keywords (textinput)
+			fieldView = m.editInputs[1].View()
+		case 3: // Notes (textarea)
+			fieldView = m.editTextareas[1].View()
+		}
+
+		isFocused = i == m.editFocusIdx
+
+		// Label and input on separate lines with better spacing
 		content.WriteString(label)
-		content.WriteString(field.View())
 		content.WriteString("\n")
+
+		if isFocused {
+			content.WriteString(focusedInputStyle.Render(fieldView))
+		} else {
+			content.WriteString(inputStyle.Render(fieldView))
+		}
 	}
 
 	content.WriteString(helpStyle.Render("[Tab]next [Shift+Tab]prev [Enter]save [Esc]cancel"))
