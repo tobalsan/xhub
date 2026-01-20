@@ -3,16 +3,21 @@ package sources
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"time"
 
 	"github.com/user/xhub/internal/db"
 )
 
-type GitHubSource struct{}
+const githubLastSyncKey = "github_last_sync_ts"
 
-func NewGitHubSource() *GitHubSource {
-	return &GitHubSource{}
+type GitHubSource struct {
+	store *db.Store
+}
+
+func NewGitHubSource(store *db.Store) *GitHubSource {
+	return &GitHubSource{store: store}
 }
 
 func (g *GitHubSource) Name() string {
@@ -34,34 +39,88 @@ type ghStar struct {
 }
 
 func (g *GitHubSource) Fetch() ([]db.Bookmark, error) {
-	// Use gh api with --paginate and --slurp to merge all pages into single array
-	cmd := exec.Command("gh", "api", "--paginate", "--slurp", "user/starred",
-		"-H", "Accept: application/vnd.github.star+json")
-
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, err
+	// Get last sync timestamp for incremental fetch
+	var lastSyncTime time.Time
+	if g.store != nil {
+		if ts, _ := g.store.GetMetadata(githubLastSyncKey); ts != "" {
+			lastSyncTime, _ = time.Parse(time.RFC3339, ts)
+		}
 	}
 
-	// --slurp wraps paginated results in an outer array: [[page1], [page2], ...]
-	var pages [][]ghStar
-	if err := json.Unmarshal(output, &pages); err != nil {
-		// Try without outer array (single page or no --slurp)
+	var allStars []ghStar
+	var newestTime time.Time
+	page := 1
+	perPage := 100 // max per page
+	reachedOld := false
+
+	for {
+		// Paginate manually to support early exit on incremental fetch
+		// sort=created&direction=desc gives newest first (default)
+		cmd := exec.Command("gh", "api",
+			fmt.Sprintf("user/starred?sort=created&direction=desc&per_page=%d&page=%d", perPage, page),
+			"-H", "Accept: application/vnd.github.star+json")
+
+		output, err := cmd.Output()
+		if err != nil {
+			if page == 1 {
+				return nil, err
+			}
+			break // stop on error after first page
+		}
+
 		var stars []ghStar
 		if err := json.Unmarshal(output, &stars); err != nil {
 			// Try concatenated JSON arrays (fallback for older gh versions)
 			stars, err = parseMultipleArrays(output)
 			if err != nil {
-				return nil, err
+				if page == 1 {
+					return nil, err
+				}
+				break
 			}
 		}
-		pages = [][]ghStar{stars}
+
+		if len(stars) == 0 {
+			break
+		}
+
+		for _, star := range stars {
+			starTime := time.Now()
+			if star.StarredAt != "" {
+				if t, err := time.Parse(time.RFC3339, star.StarredAt); err == nil {
+					starTime = t
+				}
+			}
+			// Truncate to seconds for consistent comparison (RFC3339 loses sub-second precision)
+			starTimeSec := starTime.Truncate(time.Second)
+
+			// Track newest item for next sync
+			if newestTime.IsZero() || starTimeSec.After(newestTime) {
+				newestTime = starTimeSec
+			}
+
+			// Stop if we've reached items from before last sync
+			if !lastSyncTime.IsZero() && !starTimeSec.After(lastSyncTime) {
+				reachedOld = true
+				break
+			}
+
+			allStars = append(allStars, star)
+		}
+
+		if reachedOld {
+			break
+		}
+
+		if len(stars) < perPage {
+			break // last page
+		}
+		page++
 	}
 
-	// Flatten pages
-	var allStars []ghStar
-	for _, page := range pages {
-		allStars = append(allStars, page...)
+	// Update last sync timestamp
+	if g.store != nil && !newestTime.IsZero() {
+		g.store.SetMetadata(githubLastSyncKey, newestTime.Format(time.RFC3339))
 	}
 
 	bookmarks := make([]db.Bookmark, 0, len(allStars))

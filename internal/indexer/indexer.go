@@ -35,7 +35,7 @@ func Fetch(cfg *config.Config, force bool, verbose bool) error {
 	// Collect enabled sources
 	var srcs []sources.Source
 	if cfg.Sources.GitHub {
-		src := sources.NewGitHubSource()
+		src := sources.NewGitHubSource(store)
 		if src.Available() {
 			srcs = append(srcs, src)
 		} else {
