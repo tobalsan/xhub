@@ -16,6 +16,7 @@ type FetchOptions struct {
 	Force     bool     // Full reimport (vs incremental)
 	Reprocess bool     // Re-scrape, re-summarize, re-embed existing items
 	Verbose   bool     // Show detailed processing steps
+	Silent    bool     // Suppress all output (for TUI background refresh)
 	Sources   []string // Filter to specific sources (empty = all)
 }
 
@@ -48,7 +49,7 @@ func Fetch(cfg *config.Config, opts FetchOptions) error {
 		src := sources.NewGitHubSource(store)
 		if src.Available() {
 			srcs = append(srcs, src)
-		} else {
+		} else if !opts.Silent {
 			fmt.Println("Warning: gh CLI not found, skipping GitHub")
 		}
 	}
@@ -56,7 +57,7 @@ func Fetch(cfg *config.Config, opts FetchOptions) error {
 		src := sources.NewTwitterSource(store)
 		if src.Available() {
 			srcs = append(srcs, src)
-		} else {
+		} else if !opts.Silent {
 			fmt.Println("Warning: bird CLI not found, skipping X/Twitter")
 		}
 	}
@@ -64,7 +65,7 @@ func Fetch(cfg *config.Config, opts FetchOptions) error {
 		src := sources.NewRaindropSource(store)
 		if src.Available() {
 			srcs = append(srcs, src)
-		} else {
+		} else if !opts.Silent {
 			fmt.Println("Warning: raindrop CLI not found, skipping Raindrop")
 		}
 	}
@@ -78,11 +79,14 @@ func Fetch(cfg *config.Config, opts FetchOptions) error {
 	summarizer := NewSummarizer(cfg)
 	embedder, err := NewEmbedder(cfg)
 	if err != nil {
-		fmt.Printf("Warning: embeddings disabled: %v\n", err)
+		if !opts.Silent {
+			fmt.Printf("Warning: embeddings disabled: %v\n", err)
+		}
 		embedder = nil
 	}
 
 	var totalItems int
+	var totalNewItems int
 
 	// Fetch from each source
 	// incremental = !force (default is incremental)
@@ -96,11 +100,15 @@ func Fetch(cfg *config.Config, opts FetchOptions) error {
 	stats := make(map[string]*sourceStats)
 
 	for _, src := range srcs {
-		fmt.Printf("Fetching from %s...\n", src.Name())
+		if !opts.Silent {
+			fmt.Printf("Fetching from %s...\n", src.Name())
+		}
 
 		bookmarks, err := src.Fetch(incremental)
 		if err != nil {
-			fmt.Printf("Error fetching from %s: %v\n", src.Name(), err)
+			if !opts.Silent {
+				fmt.Printf("Error fetching from %s: %v\n", src.Name(), err)
+			}
 			continue
 		}
 
@@ -111,7 +119,9 @@ func Fetch(cfg *config.Config, opts FetchOptions) error {
 		for i, b := range bookmarks {
 			isNew, err := store.UpsertReturningNew(&b)
 			if err != nil {
-				fmt.Printf("Error storing bookmark: %v\n", err)
+				if !opts.Silent {
+					fmt.Printf("Error storing bookmark: %v\n", err)
+				}
 				continue
 			}
 			if isNew {
@@ -123,14 +133,18 @@ func Fetch(cfg *config.Config, opts FetchOptions) error {
 					idsToReprocess = append(idsToReprocess, b.ID)
 				}
 			}
-			printProgress(i+1, len(bookmarks), "Storing")
+			printProgress(i+1, len(bookmarks), "Storing", opts.Silent)
 		}
-		fmt.Println()
+		if !opts.Silent {
+			fmt.Println()
+		}
 
 		// Mark existing items for reprocessing if requested
 		if opts.Reprocess && len(idsToReprocess) > 0 {
 			if err := store.MarkForReprocess(idsToReprocess); err != nil {
-				fmt.Printf("Warning: could not mark items for reprocessing: %v\n", err)
+				if !opts.Silent {
+					fmt.Printf("Warning: could not mark items for reprocessing: %v\n", err)
+				}
 			}
 		}
 
@@ -143,107 +157,132 @@ func Fetch(cfg *config.Config, opts FetchOptions) error {
 
 			orphans, err := store.GetOrphanedBySource(src.Name(), urls)
 			if err != nil {
-				fmt.Printf("Warning: could not check for orphans: %v\n", err)
+				if !opts.Silent {
+					fmt.Printf("Warning: could not check for orphans: %v\n", err)
+				}
 			} else if len(orphans) > 0 {
-				fmt.Printf("Removing %d orphaned items from %s:\n", len(orphans), src.Name())
+				if !opts.Silent {
+					fmt.Printf("Removing %d orphaned items from %s:\n", len(orphans), src.Name())
+				}
 				for _, o := range orphans {
-					fmt.Printf("  - %s\n", o.URL)
+					if !opts.Silent {
+						fmt.Printf("  - %s\n", o.URL)
+					}
 					if err := store.Delete(o.ID); err != nil {
-						fmt.Printf("    Error deleting: %v\n", err)
+						if !opts.Silent {
+							fmt.Printf("    Error deleting: %v\n", err)
+						}
 					}
 				}
 			}
 		}
 
 		totalItems += len(bookmarks)
+		totalNewItems += stats[src.Name()].newItems
 	}
 
 	// Print per-source delta stats
-	fmt.Println()
-	for name, s := range stats {
-		fmt.Printf("Found %d new %s items, skipped %d existing\n", s.newItems, name, s.skippedItems)
+	if !opts.Silent {
+		fmt.Println()
+		for name, s := range stats {
+			fmt.Printf("Found %d new %s items, skipped %d existing\n", s.newItems, name, s.skippedItems)
+		}
 	}
 
 	// Process pending items (scrape, summarize, embed)
-	pending, err := store.GetPending(100)
-	if err != nil {
-		return fmt.Errorf("failed to get pending items: %w", err)
-	}
-
-	if len(pending) > 0 {
-		fmt.Printf("Processing %d pending items...\n", len(pending))
-
-		for i, b := range pending {
-			printProgress(i+1, len(pending), "Processing")
-
-			// Scrape content
-			if b.RawContent == "" {
-				if opts.Verbose {
-					fmt.Printf("\n  Scraping: %s\n", b.URL)
-				}
-				content, err := scraper.Scrape(b.URL)
-				if err != nil {
-					if opts.Verbose {
-						fmt.Printf("  Scraping failed: %v\n", err)
-					}
-					b.ScrapeStatus = "failed"
-					store.Update(&b)
-					continue
-				}
-				b.RawContent = content
-				if opts.Verbose {
-					fmt.Printf("  Scraped %d characters\n", len(content))
-				}
-			}
-
-			// Summarize
-			if b.Summary == "" && summarizer != nil {
-				if opts.Verbose {
-					fmt.Printf("  Summarizing...\n")
-				}
-				result, err := summarizer.Summarize(b.RawContent)
-				if err != nil {
-					fmt.Printf("Warning: summarization failed for %s: %v\n", b.URL, err)
-				} else if result != nil {
-					b.Summary = result.Summary
-					if b.Keywords == "" {
-						b.Keywords = result.Keywords
-					}
-					if opts.Verbose {
-						fmt.Printf("  Summary: %s\n", result.Summary)
-						fmt.Printf("  Keywords: %s\n", result.Keywords)
-					}
-				}
-			}
-
-			// Generate embedding
-			if embedder != nil {
-				if opts.Verbose {
-					fmt.Printf("  Generating embedding...\n")
-				}
-				textToEmbed := b.Title + " " + b.Summary + " " + b.Keywords
-				if embedding, err := embedder.Embed(textToEmbed); err != nil {
-					fmt.Printf("Warning: embedding failed for %s: %v\n", b.URL, err)
-				} else {
-					store.UpdateEmbedding(b.ID, embedding)
-					if opts.Verbose {
-						fmt.Printf("  Embedding generated (dimensions: %d)\n", len(embedding))
-					}
-				}
-			}
-
-			b.ScrapeStatus = "success"
-			b.ScrapedAt = time.Now()
-			store.Update(&b)
+	// Only process if we have new items or --reprocess was requested
+	shouldProcess := totalNewItems > 0 || opts.Reprocess
+	if shouldProcess {
+		pending, err := store.GetPending(100)
+		if err != nil {
+			return fmt.Errorf("failed to get pending items: %w", err)
 		}
-		fmt.Println()
+
+		if len(pending) > 0 {
+			if !opts.Silent {
+				fmt.Printf("Processing %d pending items...\n", len(pending))
+			}
+
+			for i, b := range pending {
+				printProgress(i+1, len(pending), "Processing", opts.Silent)
+
+				// Scrape content
+				if b.RawContent == "" {
+					if opts.Verbose && !opts.Silent {
+						fmt.Printf("\n  Scraping: %s\n", b.URL)
+					}
+					content, err := scraper.Scrape(b.URL)
+					if err != nil {
+						if opts.Verbose && !opts.Silent {
+							fmt.Printf("  Scraping failed: %v\n", err)
+						}
+						b.ScrapeStatus = "failed"
+						store.Update(&b)
+						continue
+					}
+					b.RawContent = content
+					if opts.Verbose && !opts.Silent {
+						fmt.Printf("  Scraped %d characters\n", len(content))
+					}
+				}
+
+				// Summarize
+				if b.Summary == "" && summarizer != nil {
+					if opts.Verbose && !opts.Silent {
+						fmt.Printf("  Summarizing...\n")
+					}
+					result, err := summarizer.Summarize(b.RawContent)
+					if err != nil {
+						if !opts.Silent {
+							fmt.Printf("Warning: summarization failed for %s: %v\n", b.URL, err)
+						}
+					} else if result != nil {
+						b.Summary = result.Summary
+						if b.Keywords == "" {
+							b.Keywords = result.Keywords
+						}
+						if opts.Verbose && !opts.Silent {
+							fmt.Printf("  Summary: %s\n", result.Summary)
+							fmt.Printf("  Keywords: %s\n", result.Keywords)
+						}
+					}
+				}
+
+				// Generate embedding
+				if embedder != nil {
+					if opts.Verbose && !opts.Silent {
+						fmt.Printf("  Generating embedding...\n")
+					}
+					textToEmbed := b.Title + " " + b.Summary + " " + b.Keywords
+					if embedding, err := embedder.Embed(textToEmbed); err != nil {
+						if !opts.Silent {
+							fmt.Printf("Warning: embedding failed for %s: %v\n", b.URL, err)
+						}
+					} else {
+						store.UpdateEmbedding(b.ID, embedding)
+						if opts.Verbose && !opts.Silent {
+							fmt.Printf("  Embedding generated (dimensions: %d)\n", len(embedding))
+						}
+					}
+				}
+
+				b.ScrapeStatus = "success"
+				b.ScrapedAt = time.Now()
+				store.Update(&b)
+			}
+			if !opts.Silent {
+				fmt.Println()
+			}
+		}
 	}
 
 	// Update last refresh timestamp
 	store.SetMetadata(lastRefreshKey, time.Now().Format(time.RFC3339))
 
-	count, _ := store.Count()
-	fmt.Printf("Done! Total items indexed: %d\n", count)
+	if !opts.Silent {
+		count, _ := store.Count()
+		fmt.Printf("Done! Total items indexed: %d\n", count)
+	}
 
 	return nil
 }
@@ -327,7 +366,10 @@ func AddManualURL(cfg *config.Config, url string) error {
 	return store.Update(b)
 }
 
-func printProgress(current, total int, prefix string) {
+func printProgress(current, total int, prefix string, silent bool) {
+	if silent {
+		return
+	}
 	pct := float64(current) / float64(total) * 100
 	barWidth := 30
 	filled := int(float64(barWidth) * float64(current) / float64(total))
