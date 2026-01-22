@@ -35,8 +35,8 @@ func NewSummarizer(cfg *config.Config) *Summarizer {
 	return &Summarizer{cfg: cfg}
 }
 
-const summaryPrompt = `Analyze this content and provide:
-1. A concise 1-2 sentence summary of what this is about
+const defaultSummaryPrompt = `Analyze this content and provide:
+1. A short summary of what this is about. The goal is to provide semantic content to improve retrieval when searching for this resource in a bookmarks database
 2. 3-5 relevant keywords separated by commas
 
 Format your response exactly as:
@@ -53,7 +53,11 @@ func (s *Summarizer) Summarize(content string) (*SummaryResult, error) {
 		content = content[:maxContentLen]
 	}
 
-	prompt := fmt.Sprintf(summaryPrompt, content)
+	promptTemplate := defaultSummaryPrompt
+	if s.cfg.LLM.SummaryPrompt != "" {
+		promptTemplate = s.cfg.LLM.SummaryPrompt
+	}
+	prompt := fmt.Sprintf(promptTemplate, content)
 
 	var response string
 	var err error

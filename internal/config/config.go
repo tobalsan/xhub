@@ -15,11 +15,12 @@ type Config struct {
 }
 
 type LLMConfig struct {
-	Provider string            `mapstructure:"provider"`
-	Model    string            `mapstructure:"model"`
-	BaseURL  string            `mapstructure:"base_url"`
-	APIKey   string            `mapstructure:"api_key"`
-	Headers  map[string]string `mapstructure:"headers"`
+	Provider      string            `mapstructure:"provider"`
+	Model         string            `mapstructure:"model"`
+	BaseURL       string            `mapstructure:"base_url"`
+	APIKey        string            `mapstructure:"api_key"`
+	Headers       map[string]string `mapstructure:"headers"`
+	SummaryPrompt string            `mapstructure:"summary_prompt"`
 }
 
 type EmbeddingsConfig struct {

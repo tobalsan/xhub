@@ -115,6 +115,18 @@ llm:
 ```
 Set `GEMINI_API_KEY` environment variable or `api_key` in config.
 
+**Custom Summary Prompt**
+
+Override the default LLM prompt for generating summaries:
+```yaml
+llm:
+  summary_prompt: |
+    Your custom prompt here...
+    Content:
+    %s
+```
+The prompt must include `%s` where content will be inserted. Response must contain `SUMMARY:` and `KEYWORDS:` lines.
+
 **Embeddings (OpenAI)**
 ```yaml
 embeddings:
