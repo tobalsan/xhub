@@ -2,6 +2,7 @@ package indexer
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/user/xhub/internal/config"
@@ -10,6 +11,43 @@ import (
 )
 
 const lastRefreshKey = "last_refresh_at"
+
+func extractTitleFromContent(content, fallback string) string {
+	if content == "" {
+		return fallback
+	}
+
+	lines := []rune(content)
+	end := 100
+	if len(lines) < end {
+		end = len(lines)
+	}
+	for i, r := range lines[:end] {
+		if r == '\n' {
+			end = i
+			break
+		}
+	}
+
+	line := string(lines[:end])
+	if line == "" {
+		return fallback
+	}
+
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(strings.ToLower(trimmed), "title:") {
+		stripped := strings.TrimSpace(trimmed[len("title:"):])
+		if stripped == "" {
+			if fallback != "" {
+				return fallback
+			}
+			return line
+		}
+		return stripped
+	}
+
+	return line
+}
 
 // FetchOptions configures fetch behavior
 type FetchOptions struct {
@@ -226,6 +264,10 @@ func Fetch(cfg *config.Config, opts FetchOptions) error {
 					}
 				}
 
+				if b.Source == "manual" && (b.Title == "" || b.Title == b.URL) {
+					b.Title = extractTitleFromContent(b.RawContent, b.Title)
+				}
+
 				// Summarize
 				if b.Summary == "" && summarizer != nil {
 					if opts.Verbose && !opts.Silent {
@@ -322,20 +364,7 @@ func AddManualURL(cfg *config.Config, url string) error {
 	b.RawContent = content
 
 	// Extract title from content (first line usually)
-	if len(content) > 0 {
-		lines := []rune(content)
-		end := 100
-		if len(lines) < end {
-			end = len(lines)
-		}
-		for i, r := range lines[:end] {
-			if r == '\n' {
-				end = i
-				break
-			}
-		}
-		b.Title = string(lines[:end])
-	}
+	b.Title = extractTitleFromContent(content, b.Title)
 
 	// Summarize
 	summarizer := NewSummarizer(cfg)
