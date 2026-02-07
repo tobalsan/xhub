@@ -1,6 +1,7 @@
 package indexer
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -392,6 +393,107 @@ func AddManualURL(cfg *config.Config, url string) error {
 	b.ScrapeStatus = "success"
 	b.ScrapedAt = time.Now()
 
+	return store.Update(b)
+}
+
+// ReprocessByID re-scrapes and re-summarizes one bookmark by ID.
+func ReprocessByID(cfg *config.Config, id string, verbose bool) (*db.Bookmark, error) {
+	store, err := db.NewStore(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+
+	b, err := store.Get(id)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := reprocessBookmark(store, cfg, b, verbose); err != nil {
+		return nil, err
+	}
+
+	return store.Get(id)
+}
+
+// ReprocessByIDOrURL re-scrapes and re-summarizes one bookmark by ID or URL.
+func ReprocessByIDOrURL(cfg *config.Config, idOrURL string, verbose bool) (*db.Bookmark, error) {
+	store, err := db.NewStore(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	defer store.Close()
+
+	b, err := store.Get(idOrURL)
+	if err != nil {
+		if err != sql.ErrNoRows {
+			return nil, err
+		}
+		b, err = store.GetByURL(idOrURL)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				return nil, fmt.Errorf("bookmark not found: %s", idOrURL)
+			}
+			return nil, err
+		}
+	}
+
+	if err := reprocessBookmark(store, cfg, b, verbose); err != nil {
+		return nil, err
+	}
+
+	return store.Get(b.ID)
+}
+
+func reprocessBookmark(store *db.Store, cfg *config.Config, b *db.Bookmark, verbose bool) error {
+	// Reset fields to force re-scrape + re-summary.
+	b.ScrapeStatus = "pending"
+	b.RawContent = ""
+	b.Summary = ""
+	b.Keywords = ""
+	b.ScrapedAt = time.Time{}
+	if err := store.Update(b); err != nil {
+		return err
+	}
+
+	scraper := NewScraper()
+	content, err := scraper.Scrape(b.URL)
+	if err != nil {
+		b.ScrapeStatus = "failed"
+		_ = store.Update(b)
+		return fmt.Errorf("scrape failed: %w", err)
+	}
+	b.RawContent = content
+
+	// Refresh title from scraped content (except X where tweet text is title).
+	if b.Source != "x" {
+		b.Title = extractTitleFromContent(content, b.Title)
+	}
+
+	summarizer := NewSummarizer(cfg)
+	result, err := summarizer.Summarize(content)
+	if err != nil {
+		return fmt.Errorf("summarization failed: %w", err)
+	}
+	if result != nil {
+		b.Summary = result.Summary
+		b.Keywords = result.Keywords
+	}
+
+	embedder, err := NewEmbedder(cfg)
+	if err == nil {
+		textToEmbed := b.Title + " " + b.Summary + " " + b.Keywords
+		if embedding, err := embedder.Embed(textToEmbed); err == nil {
+			store.UpdateEmbedding(b.ID, embedding)
+		} else if verbose {
+			fmt.Printf("Warning: embedding failed for %s: %v\n", b.URL, err)
+		}
+	} else if verbose {
+		fmt.Printf("Warning: embeddings disabled: %v\n", err)
+	}
+
+	b.ScrapeStatus = "success"
+	b.ScrapedAt = time.Now()
 	return store.Update(b)
 }
 

@@ -19,10 +19,10 @@ import (
 )
 
 type model struct {
-	cfg         *config.Config
-	store       *db.Store
-	searchInput textinput.Model
-	list        list.Model
+	cfg          *config.Config
+	store        *db.Store
+	searchInput  textinput.Model
+	list         list.Model
 	allBookmarks []db.Bookmark   // Unfiltered search results
 	sources      map[string]bool // Source filter toggles
 	width        int
@@ -34,16 +34,21 @@ type model struct {
 	editing       bool
 	editBookmark  *db.Bookmark
 	editInputs    []textinput.Model // 0=title, 2=keywords
-	editTextareas []textarea.Model // 1=summary, 3=notes
+	editTextareas []textarea.Model  // 1=summary, 3=notes
 	editFocusIdx  int
 
 	// Delete confirmation state
 	deleting       bool
 	deleteBookmark *db.Bookmark
+
+	// Reprocess state
+	reprocessing   bool
+	reprocessingID string
 }
 
 type bookmarkItem struct {
-	bookmark db.Bookmark
+	bookmark     db.Bookmark
+	reprocessing bool
 }
 
 func (b bookmarkItem) Title() string {
@@ -64,6 +69,9 @@ func sanitizeLine(s string) string {
 }
 
 func (b bookmarkItem) Description() string {
+	if b.reprocessing {
+		return "Reprocessing..."
+	}
 	if b.bookmark.Summary != "" {
 		summary := sanitizeLine(b.bookmark.Summary)
 		if len(summary) > 80 {
@@ -147,6 +155,11 @@ type editSaveMsg struct {
 type deleteMsg struct {
 	id  string
 	err error
+}
+
+type reprocessMsg struct {
+	bookmark *db.Bookmark
+	err      error
 }
 
 func (m model) Init() tea.Cmd {
@@ -302,6 +315,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.deleteBookmark = &bm
 				}
 			}
+		case "r":
+			if !m.searching && !m.editing && !m.deleting && !m.reprocessing {
+				if item, ok := m.list.SelectedItem().(bookmarkItem); ok {
+					m.reprocessing = true
+					m.reprocessingID = item.bookmark.ID
+					m.list.SetItems(m.bookmarksToItems(m.allBookmarks))
+					return m, m.doReprocess(item.bookmark.ID)
+				}
+			}
 		case "y":
 			if m.deleting && m.deleteBookmark != nil {
 				return m, m.doDelete(m.deleteBookmark.ID)
@@ -404,6 +426,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.allBookmarks = newBookmarks
 		m.list.SetItems(m.bookmarksToItems(m.allBookmarks))
+		return m, nil
+
+	case reprocessMsg:
+		m.reprocessing = false
+		m.reprocessingID = ""
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		if msg.bookmark != nil {
+			for i, b := range m.allBookmarks {
+				if b.ID == msg.bookmark.ID {
+					m.allBookmarks[i] = *msg.bookmark
+					break
+				}
+			}
+			m.list.SetItems(m.bookmarksToItems(m.allBookmarks))
+		}
 		return m, nil
 	}
 
@@ -591,11 +631,19 @@ func (m model) doDelete(id string) tea.Cmd {
 	}
 }
 
+func (m model) doReprocess(id string) tea.Cmd {
+	cfg := m.cfg
+	return func() tea.Msg {
+		b, err := indexer.ReprocessByID(cfg, id, false)
+		return reprocessMsg{bookmark: b, err: err}
+	}
+}
+
 func (m model) bookmarksToItems(bookmarks []db.Bookmark) []list.Item {
 	items := make([]list.Item, 0, len(bookmarks))
 	for _, b := range bookmarks {
 		if m.sources[b.Source] {
-			items = append(items, bookmarkItem{bookmark: b})
+			items = append(items, bookmarkItem{bookmark: b, reprocessing: m.reprocessing && m.reprocessingID == b.ID})
 		}
 	}
 	return items
@@ -652,7 +700,18 @@ func (m model) View() string {
 	filterBar := filterStyle.Render(strings.Join(filters, " "))
 
 	b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, searchBox, "  ", filterBar))
-	b.WriteString("\n\n")
+	b.WriteString("\n")
+
+	if m.reprocessing {
+		statusStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("229")).
+			Background(lipgloss.Color("62")).
+			Padding(0, 1)
+		b.WriteString(statusStyle.Render("Reprocessing selected bookmark..."))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
 
 	// List
 	b.WriteString(m.list.View())
@@ -662,7 +721,7 @@ func (m model) View() string {
 		Foreground(lipgloss.Color("240")).
 		MarginTop(1)
 
-	help := "[j/k]nav [g/G]top/end [/]search [o]pen [Enter]edit [d]elete [1-4]filters [q]uit"
+	help := "[j/k]nav [g/G]top/end [/]search [o]pen [Enter]edit [r]reprocess [d]delete [1-4]filters [q]uit"
 	b.WriteString(helpStyle.Render(help))
 
 	return b.String()

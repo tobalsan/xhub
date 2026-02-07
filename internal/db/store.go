@@ -279,7 +279,7 @@ func (s *Store) List(sources []string, limit int) ([]Bookmark, error) {
 		query += `)`
 	}
 
-	query += ` ORDER BY updated_at DESC LIMIT ?`
+	query += ` ORDER BY CASE WHEN source IN ('raindrop', 'github', 'x') THEN created_at ELSE updated_at END DESC LIMIT ?`
 	args = append(args, limit)
 
 	rows, err := s.db.Query(query, args...)
