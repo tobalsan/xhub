@@ -175,7 +175,7 @@ func (m model) initStore() tea.Msg {
 		}()
 	}
 
-	bookmarks, err := store.List(nil, 100)
+	bookmarks, err := store.List(nil, 1000)
 	if err != nil {
 		return initMsg{store: store, err: err}
 	}
