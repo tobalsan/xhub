@@ -268,6 +268,9 @@ func Fetch(cfg *config.Config, opts FetchOptions) error {
 				if b.Source == "manual" && (b.Title == "" || b.Title == b.URL) {
 					b.Title = extractTitleFromContent(b.RawContent, b.Title)
 				}
+				if b.Source == "x" && isURLOnlyTitle(b.Title) {
+					b.Title = extractTitleFromContent(b.RawContent, b.Title)
+				}
 
 				// Summarize
 				if b.Summary == "" && summarizer != nil {
@@ -465,8 +468,8 @@ func reprocessBookmark(store *db.Store, cfg *config.Config, b *db.Bookmark, verb
 	}
 	b.RawContent = content
 
-	// Refresh title from scraped content (except X where tweet text is title).
-	if b.Source != "x" {
+	// Refresh title from scraped content for non-X sources, and for X URL-only titles.
+	if b.Source != "x" || isURLOnlyTitle(b.Title) {
 		b.Title = extractTitleFromContent(content, b.Title)
 	}
 
@@ -515,4 +518,16 @@ func printProgress(current, total int, prefix string, silent bool) {
 	}
 
 	fmt.Printf("\r%s [%s] %d/%d (%.0f%%)", prefix, bar, current, total, pct)
+}
+
+func isURLOnlyTitle(title string) bool {
+	t := strings.TrimSpace(title)
+	if t == "" {
+		return true
+	}
+	parts := strings.Fields(t)
+	if len(parts) != 1 {
+		return false
+	}
+	return strings.HasPrefix(parts[0], "http://") || strings.HasPrefix(parts[0], "https://")
 }

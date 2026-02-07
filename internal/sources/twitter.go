@@ -104,29 +104,37 @@ func (t *TwitterSource) Fetch(incremental bool) ([]db.Bookmark, error) {
 			break
 		}
 
+		pageHasNew := false
 		for _, tweet := range resp.Tweets {
 			var tweetTime time.Time
+			parsedTime := false
 			if tweet.CreatedAt != "" {
 				if parsed, err := time.Parse(twitterTimeFormat, tweet.CreatedAt); err == nil {
 					tweetTime = parsed.Truncate(time.Second)
+					parsedTime = true
 				}
 			}
 
 			// Track newest time for metadata update
-			if newestTime.IsZero() || tweetTime.After(newestTime) {
+			if parsedTime && (newestTime.IsZero() || tweetTime.After(newestTime)) {
 				newestTime = tweetTime
 			}
 
-			// If incremental and this tweet is at or before last sync, stop
-			if !lastSyncTime.IsZero() && !tweetTime.After(lastSyncTime) {
-				reachedOld = true
-				break
+			// Skip older tweets in incremental mode, but do not stop early within page.
+			if !lastSyncTime.IsZero() && parsedTime && !tweetTime.After(lastSyncTime) {
+				continue
 			}
 
+			pageHasNew = true
 			allTweets = append(allTweets, tweet)
 		}
 
-		// If no more pages or we've reached old items, stop
+		// In incremental mode, once a full page has no new items we're done.
+		if incremental && !lastSyncTime.IsZero() && !pageHasNew {
+			reachedOld = true
+		}
+
+		// If no more pages or we've reached old items, stop.
 		if resp.NextCursor == "" || reachedOld {
 			break
 		}
@@ -159,9 +167,9 @@ func (t *TwitterSource) Fetch(incremental bool) ([]db.Bookmark, error) {
 			Source:       "x",
 			URL:          url,
 			Title:        title,
-			RawContent:   tweet.Text,
+			RawContent:   "",
 			CreatedAt:    createdAt,
-			ScrapeStatus: "success",
+			ScrapeStatus: "pending",
 		})
 	}
 
